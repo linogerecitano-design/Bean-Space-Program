@@ -79,7 +79,10 @@ function tankMaterial(p) {
 const SEG = 48;
 const cyl = (rTop, rBot, h, seg = SEG, open = false) => { const g = new THREE.CylinderGeometry(rTop, rBot, h, seg, 1, open); g.translate(0, -h / 2, 0); return g; };
 function lathe(points, seg = SEG) { // points [ [r, y], ... ] top to bottom
+  // LatheGeometry winds its faces outward only for profiles running bottom to top: fed top to bottom
+  // (as every builder here does) capsules, nose cones and fairings rendered inside out
   const pts = points.map(([r, y]) => new THREE.Vector2(Math.max(0.0001, r), y));
+  if (pts.length > 1 && pts[0].y > pts[pts.length - 1].y) pts.reverse();
   const g = new THREE.LatheGeometry(pts, seg); return g;
 }
 function add(group, geo, material, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {

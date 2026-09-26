@@ -217,3 +217,9 @@ body.compact #menu .title { font-size: 26px; }
 body.compact #menu button { padding: 9px 12px; font-size: 14px; }
 body.compact.portrait #menu { right: 50%; transform: translate(50%, -50%); }
 body.compact .modal { padding: 12px; gap: 8px; max-height: 92vh; }
+
+/* VAB touch action bar (select a part with a tap) */
+#vab-actions { position: fixed; top: 92px; right: max(6px, env(safe-area-inset-right)); display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; padding: 5px; z-index: 7; max-width: calc(100vw - 12px); }
+#vab-actions button { padding: 7px 11px; font-size: 13px; }
+#vab-actions > b, #vab-actions > span { padding: 0 6px; }
+body:not(.compact) #vab-actions { top: 64px; right: auto; left: 50%; transform: translateX(-50%); }

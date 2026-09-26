@@ -48,6 +48,8 @@ export function layout(design) {
               const sr = stackR(r.node.stack); const off = (rp.decoupler ? 0.6 : (rp.d || 0.3)) + sr;
               placeStack(r.node.stack, bx + ca * off, yA + (r.node.stackOffset ?? 0.5) * Math.min(stackH(r.node.stack), (p.h || 1) * 2) * 0.2 + (rp.h || 1) / 2, bz - sa * off, a, r.sym, pl.depthAxial, rpl, k);
             }
+          } else if (rp.chute && r.sym === 1) { // a stack chute pack "on the side" of a pod: it lives in the nose bay
+            placeStack(r.node, x, cy + (rp.h || 1) * 0.3, z, ang, 1, pl.depthAxial, pl, 0);
           } else { // stack part attached directly on the side (strap-on without decoupler)
             const sr = stackR(r.node); const off = sr;
             placeStack(r.node, bx + ca * off, yA + (rp.h || 1) / 2, bz - sa * off, a, r.sym, pl.depthAxial, pl, k);

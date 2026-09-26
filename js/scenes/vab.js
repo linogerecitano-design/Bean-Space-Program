@@ -107,6 +107,7 @@ export class VABScene {
     this.symBtns = SYMS.map(n => h('button' + (n === this.sym ? '.on' : ''), { onclick: () => this.setSym(n) }, '×' + n));
     mount(h('div#vab-bottom.panel', {}, h('span.small.dim', {}, 'Symmetry (X)'), ...this.symBtns,
       h('span.small.dim.vab-hint', {}, 'Drag parts to green nodes · Right-click a part for options · Del removes')));
+    this.actions = h('div#vab-actions.panel', { style: { display: 'none' } }); mount(this.actions); this.touchBar();
     this.updateStats();
   }
   setSym(n) { this.sym = n; this.symBtns?.forEach((b, i) => b.classList.toggle('on', SYMS[i] === n)); if (this.held) this.updateSnap(); }
@@ -139,7 +140,7 @@ export class VABScene {
     }
     this.held = { node: n, fromRocket: false, pointerId: e.pointerId, dragged: false, start: [e.clientX, e.clientY] };
     this.buildGhost(); this.showNodes(); this.mouse.x = e.clientX; this.mouse.y = e.clientY; this.updateSnap();
-    document.body.classList.add('vab-holding');
+    document.body.classList.add('vab-holding'); this.lastPointer = e.pointerType; this.touchBar();
   }
   pickUp(node) {
     if (node === this.design.root) { this.sel = node; this.markSel(); this.updateStats(); return flash('The root part stays put — move the parts attached to it instead'); }
@@ -153,7 +154,7 @@ export class VABScene {
     this.sel = null; this.rebuild(); this.buildGhost(); this.showNodes(); this.updateSnap();
     document.body.classList.add('vab-holding');
   }
-  clearHeld() { this.held = null; this.snap = null; this.ghostRoot.clear(); this.nodeRoot.clear(); document.body.classList.remove('vab-holding'); }
+  clearHeld() { this.held = null; this.snap = null; this.ghostRoot.clear(); this.nodeRoot.clear(); document.body.classList.remove('vab-holding'); queueMicrotask(() => this.touchBar()); }
   cancelHeld() { const from = this.held && this.held.fromRocket; this.clearHeld(); if (from) { this.design = JSON.parse(this.undoStack.pop()); this.rebuild(); } }
   dropHeld(discard) {
     const H = this.held; if (!H) return;
@@ -201,6 +202,15 @@ export class VABScene {
     if (this.held) { this.held.pointerId = e.pointerId; this.held.pressed = true; this.mouse.x = e.clientX; this.mouse.y = e.clientY; this.updateSnap(); return true; }
     if (e.button !== 0) return false;
     const hit = this.pickPart(e.clientX, e.clientY);
+    this.lastPointer = e.pointerType;
+    if (e.pointerType === 'touch') {
+      // touch: a drag always turns the camera (even starting on the rocket); a tap selects a part and
+      // brings up the action bar (Move / Copy / Delete / Options); a long press opens the options
+      this.tapCand = { hit, x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+      clearTimeout(this.longPress);
+      if (hit) this.longPress = setTimeout(() => { const c = this.tapCand; if (c && c.id === e.pointerId) { this.tapCand = null; this.partMenu(hit, c.x, c.y); } }, 600);
+      return false;
+    }
     if (!hit) { this.pending = null; return false; }
     this.pending = { node: hit.node, x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
     clearTimeout(this.longPress);
@@ -209,6 +219,7 @@ export class VABScene {
   }
   onMove(e) {
     this.mouse.x = e.clientX; this.mouse.y = e.clientY;
+    if (this.tapCand && e.pointerId === this.tapCand.id && Math.hypot(e.clientX - this.tapCand.x, e.clientY - this.tapCand.y) > 10) { this.tapCand = null; clearTimeout(this.longPress); }
     if (this.pending && e.pointerId === this.pending.id && Math.hypot(e.clientX - this.pending.x, e.clientY - this.pending.y) > 7) { clearTimeout(this.longPress); const n = this.pending.node; this.pending = null; this.pickUp(n); }
     if (this.held) { if (this.held.start && Math.hypot(e.clientX - this.held.start[0], e.clientY - this.held.start[1]) > 10) this.held.dragged = true; this.updateSnap(); return; }
     // hover highlight
@@ -216,6 +227,12 @@ export class VABScene {
   }
   onUp(e) {
     clearTimeout(this.longPress);
+    const tc = this.tapCand;
+    if (tc && e.pointerId === tc.id) {
+      this.tapCand = null;
+      if (performance.now() - tc.t < 600) { this.sel = tc.hit ? tc.hit.node : null; this.markSel(); this.updateStats(); this.touchBar(); }
+      return;
+    }
     if (this.pending && e.pointerId === this.pending.id) { this.sel = this.pending.node; this.pending = null; this.markSel(); this.updateStats(); return; }
     const H = this.held; if (!H) return;
     if (H.pointerId !== undefined && e.pointerId !== H.pointerId) return;
@@ -304,6 +321,24 @@ export class VABScene {
     const p = modal('Load design', list, [{ label: 'Close' }]);
     list.addEventListener('pick', () => { document.querySelector('.modal-bg')?.remove(); this.nameIn.value = this.design.name; this.rebuild(true); });
     await p;
+  }
+  // touch action bar: what a mouse does with drag / right-click / Delete, as buttons
+  touchBar() {
+    const el = this.actions; if (!el) return;
+    const touch = this.lastPointer === 'touch';
+    const B = (label, fn, cls = '') => h('button' + cls, { onclick: (e) => { e.stopPropagation(); fn(); } }, label);
+    if (this.held && touch) {
+      el.replaceChildren(h('span.small', {}, 'Tap or drag onto a green node'), B('Cancel', () => { this.cancelHeld(); this.touchBar(); }), B('Discard', () => { this.dropHeld(true); this.touchBar(); }, '.danger'));
+    } else if (this.sel && touch) {
+      const node = this.sel, isRoot = node === this.design.root;
+      el.replaceChildren(h('b.small', {}, PART[node.id].name),
+        isRoot ? null : B('Move', () => { this.pickUp(node); this.touchBar(); }),
+        B('Copy', () => { this.held = { node: reseeded(cloneNode(node)), fromRocket: false, dragged: false }; this.buildGhost(); this.showNodes(); this.updateSnap(); document.body.classList.add('vab-holding'); this.touchBar(); }),
+        B('Options', () => { const r = el.getBoundingClientRect(); this.partMenu({ node }, Math.max(8, r.left - 160), r.bottom); }),
+        B('Delete', () => { this.deleteNode(node); this.touchBar(); }, '.danger'),
+        B('✕', () => { this.sel = null; this.markSel(); this.updateStats(); this.touchBar(); }));
+    } else { el.replaceChildren(); }
+    el.style.display = el.children.length ? '' : 'none';
   }
   // right-click / long-press part options
   partMenu(hit, x, y) {
