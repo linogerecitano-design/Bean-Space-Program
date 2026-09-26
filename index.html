@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#02040a">
+<title>Bean Space Program</title>
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.min.js","three/addons/":"./vendor/three/addons/"}}</script>
+</head>
+<body>
+<canvas id="view" tabindex="0"></canvas>
+<div id="ui"></div>
+<div id="loading">
+  <div class="logo">BEAN SPACE<br>PROGRAM</div>
+  <div class="sub">Loading the universe</div>
+  <div class="bar" id="loadbar"><i></i></div>
+  <div class="dim small" id="loadtxt">Starting…</div>
+</div>
+<script type="module" src="js/main.js"></script>
+<script src="js/dev_snap.js"></script>
+</body>
+</html>

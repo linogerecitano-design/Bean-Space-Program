@@ -1,0 +1,13 @@
+<!doctype html><html><body style="margin:0;background:#445">
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.min.js","three/addons/":"./vendor/three/addons/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+const r=new THREE.WebGLRenderer();r.setSize(innerWidth,innerHeight);document.body.appendChild(r.domElement);
+const s=new THREE.Scene();s.add(new THREE.AmbientLight(0xffffff,2));
+const c=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,0.01,100);
+new GLTFLoader().load('assets/bean.glb',g=>{
+ const m=g.scene;
+ const m2=m.clone();m2.rotation.y=Math.PI/2;m2.position.x=1.2;
+ s.add(m);s.add(m2);const bb=new THREE.Box3().setFromObject(m);window.bb=bb;const ctr=bb.getCenter(new THREE.Vector3());const sz=bb.getSize(new THREE.Vector3()).length();c.position.set(ctr.x+sz*0.3,ctr.y,ctr.z+sz*1.6);c.lookAt(ctr.x+sz*0.3,ctr.y,ctr.z);r.setAnimationLoop(()=>r.render(s,c));window.done=1;});
+</script></body></html>

@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#fff;font:14px sans-serif}canvas{width:100%;height:100%;display:block;touch-action:none}#info{position:fixed;top:6px;left:6px;background:#0008;padding:6px;white-space:pre}</style>
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.min.js","three/addons/":"./vendor/three/addons/"}}</script>
+</head><body><canvas id="c"></canvas><div id="info">loading…</div>
+<script type="module">
+import * as THREE from 'three';
+import { World } from './js/render/world.js';
+import { loadSystem, START_T } from './js/core/universe.js';
+import { loadCpuMaps, loadGroundArrays } from './js/render/textures.js';
+import { loadScatterLibrary } from './js/render/scatter.js';
+import { OrbitCam } from './js/core/camera.js';
+import { V3 } from './js/core/math.js';
+const info = document.getElementById('info');
+const q = new URLSearchParams(location.search);
+await Promise.all([loadCpuMaps(), loadGroundArrays(), q.get('scatter') ? loadScatterLibrary() : null]);
+const world = new World(document.getElementById('c'));
+const sys = loadSystem(q.get('star') || 'sol'); world.setSystem(sys);
+const body = sys.get(q.get('body') || 'Earth');
+const oc = new OrbitCam(world.renderer.domElement); oc.dist = +(q.get('dist') || body.radius * 3); oc.pitch = +(q.get('pitch') || 0.2); oc.yaw = +(q.get('yaw') || 0);
+let t = START_T + +(q.get('dt') || 0); const warp = +(q.get('warp') || 1);
+let lat = q.get('lat'), lon = q.get('lon');
+window.world = world; window.oc = oc; window.sys = sys; window.body = body;
+let last = performance.now(); let frames = 0, fpsT = 0, fps = 0;
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt * warp;
+  frames++; fpsT += dt; if (fpsT > 1) { fps = frames / fpsT; frames = 0; fpsT = 0; }
+  const bp = body.posAt(t);
+  let target = bp.clone(), up = null;
+  if (lat !== null) {
+    const la = +lat * Math.PI / 180, lo = +lon * Math.PI / 180;
+    const bf = new THREE.Vector3(Math.cos(la) * Math.cos(lo), Math.sin(la), -Math.cos(la) * Math.sin(lo));
+    const h = body.surface ? body.surface.height(bf.x, bf.y, bf.z) : 0;
+    const w = bf.clone().applyQuaternion(body.rotAt(t));
+    target = bp.clone().add(new V3(w.x, w.y, w.z).scale(body.radius + h + +(q.get('agl') || 2)));
+    up = w;
+  }
+  const off = oc.apply(world.camera, up || new THREE.Vector3(0, 1, 0));
+  const camPos = target.clone().add(new V3(off.x, off.y, off.z));
+  world.update({ t, camPos, lodScale: 1 });
+  info.textContent = `${body.name}  fps ${fps.toFixed(0)}  dist ${(oc.dist/1000).toFixed(1)} km  calls ${world.renderer.info.render.calls} tris ${(world.renderer.info.render.triangles/1e6).toFixed(2)}M`;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+window.stepFrames = (n = 1, dtMs = 33) => { for (let i = 0; i < n; i++) { last -= dtMs; const rl = requestAnimationFrame; window.requestAnimationFrame = () => 0; loop(performance.now()); window.requestAnimationFrame = rl; } return info.textContent; };
+window.ready = 1;
+</script><script src="js/dev_snap.js"></script>
+</body></html>

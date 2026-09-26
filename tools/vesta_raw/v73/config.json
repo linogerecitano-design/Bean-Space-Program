@@ -1,0 +1,381 @@
+{
+  "name": "vesta",
+  "seed": 73,
+  "width": 1024,
+  "height": 512,
+  "radius_km": 262.0,
+  "shape_amp_km": 9.0,
+  "shape_freq": 1.0,
+  "shape_octaves": 4,
+  "lump_amp_frac": 0.035,
+  "lump_freq": 0.8,
+  "oblateness": 0.02,
+  "macro_amp_km": 6.5,
+  "macro_freq": 0.55,
+  "macro_octaves": 3,
+  "eroded_crust": 0.0,
+  "eroded_face": 320,
+  "eroded_freq": 3.2,
+  "eroded_octaves": 8,
+  "eroded_ridged": false,
+  "eroded_cache": true,
+  "crust_amp_km": 2.6,
+  "crust_freq": 11.0,
+  "crust_octaves": 9,
+  "crust_multifractal": 0.55,
+  "crust_warp2": 0.45,
+  "ridge_amp_km": 1.1,
+  "ridge_freq": 6.0,
+  "dichotomy_km": 1.2,
+  "dichotomy_sharp": 0.45,
+  "dichotomy_albedo": 0.3,
+  "dichotomy_retention": 0.4,
+  "age_provinces": 0.5,
+  "age_freq": 2.4,
+  "ejecta_blankets": 0.11,
+  "ejecta_reach": 3.2,
+  "antipodal_amount": 0.8,
+  "province_freq": 3.5,
+  "province_block_km": 0.3,
+  "province_scarp_km": 0.26,
+  "province_edge_width": 0.09,
+  "province_coverage": 0.42,
+  "province_mask_freq": 2.2,
+  "n_basins": 4,
+  "basin_diam_frac": [
+    0.55,
+    1.6
+  ],
+  "basin_depth_coef": 0.42,
+  "basin_irregularity": 0.22,
+  "basin_flood_chance": 0.0,
+  "basin_fill_frac": [
+    0.4,
+    0.9
+  ],
+  "basin_rings": [
+    2,
+    4
+  ],
+  "basin_terraces": 7,
+  "basin_floor_rough": 0.075,
+  "basin_ring_rough": 0.85,
+  "basin_keep_texture": 0.3,
+  "n_young_basins": 1,
+  "young_basin_frac": [
+    0.45,
+    0.85
+  ],
+  "basin_regional_frac": 0.7,
+  "basin_regional_reach": 2.2,
+  "basin_ejecta_rise": 0.22,
+  "n_palimpsests": 35,
+  "palimpsest_diam_frac": [
+    0.08,
+    0.75
+  ],
+  "palimpsest_depth_coef": 0.22,
+  "crater": {
+    "transition_km": 42.0,
+    "peak_ring_mult": 8.0,
+    "ejecta_extent": 3.0,
+    "ejecta_exponent": 3.0,
+    "depth_scale": 1.1,
+    "rim_scale": 1.15,
+    "lobes": true,
+    "sfd_slope": 1.9,
+    "degradation": 1.5,
+    "min_pixels": 1.6
+  },
+  "epochs": [
+    {
+      "label": "pre-mare basins-era",
+      "density_at_1km": 0.0045,
+      "dmin_km": 6.0,
+      "dmax_km": 209.60000000000002,
+      "freshness_floor": 0.0,
+      "record_min_km": 1000000000.0
+    },
+    {
+      "label": "pre-mare heavy bombardment",
+      "density_at_1km": 0.16,
+      "dmin_km": 0.0,
+      "dmax_km": 52.400000000000006,
+      "freshness_floor": 0.0,
+      "record_min_km": 1000000000.0
+    },
+    {
+      "label": "post-mare",
+      "density_at_1km": 0.04,
+      "dmin_km": 0.0,
+      "dmax_km": 31.439999999999998,
+      "freshness_floor": 0.0,
+      "record_min_km": 4.0
+    },
+    {
+      "label": "recent",
+      "density_at_1km": 0.006,
+      "dmin_km": 0.0,
+      "dmax_km": 18.340000000000003,
+      "freshness_floor": 0.6,
+      "record_min_km": 2.5
+    }
+  ],
+  "dmin_pixels": 2.2,
+  "dmax_frac": 0.32,
+  "mare_patch_amount": 0.0,
+  "mare_patch_freq": 2.0,
+  "mare_roughness_km": 0.03,
+  "mare_level_pct": 46.0,
+  "mare_asymmetry": 0.55,
+  "mare_lobes": 0.55,
+  "mare_lobe_px": 55.0,
+  "mare_front_km": 0.045,
+  "wrinkle_height_km": 0.0,
+  "n_domes": 0,
+  "dome_diam_km": [
+    35.0,
+    130.0
+  ],
+  "dome_height_ratio": 0.028,
+  "caldera_chance": 0.4,
+  "n_canyons": 3,
+  "canyon_width_km": [
+    12.0,
+    25.0
+  ],
+  "canyon_depth_km": [
+    1.2,
+    2.6
+  ],
+  "canyon_branches": 2,
+  "canyon_graben": true,
+  "n_scarps": 2,
+  "scarp_height_km": [
+    0.35,
+    1.1
+  ],
+  "n_catenae": 2,
+  "secondaries": true,
+  "fracture_depth_km": 0.55,
+  "fracture_scales": [
+    [
+      3.5,
+      0.22,
+      1.0,
+      6,
+      4
+    ],
+    [
+      8.0,
+      0.16,
+      0.62,
+      6,
+      2
+    ],
+    [
+      19.0,
+      0.11,
+      0.34,
+      5,
+      1
+    ]
+  ],
+  "fracture_shoulder": 0.14,
+  "fracture_coverage": 0.55,
+  "fracture_mask_freq": 1.8,
+  "chaos_amount": 0.3,
+  "chaos_relief_km": 0.45,
+  "chaos_freq": 3.0,
+  "chaos_cell_freq": 22.0,
+  "massif_amp_km": 2.6,
+  "massif_inner": 0.88,
+  "massif_outer": 1.32,
+  "n_rilles": 0,
+  "rille_width_km": [
+    4.0,
+    12.0
+  ],
+  "rille_depth_km": [
+    0.15,
+    0.55
+  ],
+  "n_ghost_craters": 0,
+  "ghost_diam_km": [
+    18.0,
+    140.0
+  ],
+  "n_floor_fractured": 4,
+  "n_melt_ponds": 10,
+  "n_concentric": 5,
+  "light_plains_amount": 0.0,
+  "light_plains_freq": 4.0,
+  "light_plains_blur_km": 6.0,
+  "n_swirls": 0,
+  "swirl_strength": 0.55,
+  "swirl_width": 0.55,
+  "n_pyroclastic": 0,
+  "pyroclastic_strength": 0.7,
+  "n_dark_halos": 0,
+  "dark_halo_strength": 0.6,
+  "polar_frost": 0.55,
+  "polar_frost_lat": 68.0,
+  "slope_streaks": 0.65,
+  "bright_peak_strength": 0.7,
+  "blocky_ejecta": 0.55,
+  "terrace_amount": 0.15,
+  "terrace_step_km": 0.2,
+  "terrace_sharpness": 0.72,
+  "terrace_freq": 3.5,
+  "strata_amount": 0.0,
+  "strata_step_km": 0.55,
+  "strata_step_px": 0.0,
+  "strata_crenulation": 0.28,
+  "strata_px": 8.0,
+  "strata_dissect": 0.5,
+  "strata_talus": 0.35,
+  "strata_freq": 2.6,
+  "garden_sigma_px": 0.95,
+  "garden_strength": 0.32,
+  "regolith_sigma_px": 2.2,
+  "regolith_amount": 0.18,
+  "repose_deg": 30.0,
+  "wasting_iterations": 16,
+  "sharpen_amount": 0.45,
+  "relief_cap_frac": 0.12,
+  "micro_amp_km": 0.055,
+  "micro_px": 15.0,
+  "micro_octaves": 4,
+  "roughness_amp_km": 0.16,
+  "roughness_px": 85.0,
+  "roughness_octaves": 5,
+  "crater_detail": 0.75,
+  "crater_detail_px": 34.0,
+  "crater_detail_cap": 0.0035,
+  "crater_detail_octaves": 7,
+  "crater_detail_density": 1.0,
+  "palette": {
+    "highland_albedo": 0.155,
+    "mare_albedo": 0.1,
+    "fresh_albedo": 0.25,
+    "ray_albedo": 0.3,
+    "mature_albedo": 0.105,
+    "dust_albedo": 0.19,
+    "highland_tint": [
+      1.0,
+      0.968,
+      0.915
+    ],
+    "mare_tint": [
+      0.96,
+      0.955,
+      0.985
+    ],
+    "fresh_tint": [
+      1.0,
+      0.995,
+      0.985
+    ],
+    "saturation": 0.8,
+    "ramp": [
+      [
+        0.0,
+        [
+          0.46,
+          0.3,
+          0.22
+        ]
+      ],
+      [
+        0.35,
+        [
+          0.78,
+          0.55,
+          0.4
+        ]
+      ],
+      [
+        0.7,
+        [
+          0.98,
+          0.84,
+          0.7
+        ]
+      ],
+      [
+        1.0,
+        [
+          1.1,
+          1.03,
+          0.94
+        ]
+      ]
+    ],
+    "hypsometric": 0.45,
+    "ramp_gamma": 1.0,
+    "dust_amount": 0.28,
+    "dust_slope_deg": 14.0,
+    "slope_effect": 0.2,
+    "crack_darkening": 0.26,
+    "frost_albedo": 0.45,
+    "streak_darkening": 0.16,
+    "bedrock_albedo": 0.115,
+    "wear_strength": 0.45,
+    "sediment_albedo": 0.205,
+    "deposit_strength": 0.5,
+    "mare_depth_darkening": 0.3,
+    "bright_gain": 0.55,
+    "dark_gain": 0.6,
+    "mottle_amount": 0.055,
+    "patch_amount": 0.1,
+    "albedo_gain": 3.0,
+    "contrast": 1.0,
+    "black_point": 0.065,
+    "white_point": 0.92,
+    "shoulder": 0.2,
+    "tone_power": 1.35,
+    "gamma": 2.2
+  },
+  "n_large_craters": 22,
+  "large_crater_frac": [
+    0.05,
+    0.26
+  ],
+  "large_crater_fresh": [
+    0.2,
+    0.95
+  ],
+  "giant_crater_chance": 0.14,
+  "giant_crater_frac": [
+    0.3,
+    0.55
+  ],
+  "n_rayed_giants": 3,
+  "rayed_giant_frac": [
+    0.03,
+    0.058
+  ],
+  "ray_craters": 12,
+  "ray_min_frac": 0.004,
+  "ray_length": [
+    6.0,
+    22.0
+  ],
+  "ray_freshness": 0.55,
+  "mottle_px": 22.0,
+  "bake_ao": 0.0,
+  "regional_sigma_frac": 0.02,
+  "preview_size": 1100,
+  "view_lat": 6.0,
+  "view_lon": 0.0,
+  "sun_lat": 9.0,
+  "sun_lon": 46.0,
+  "exaggeration": 1.0,
+  "shadows": true,
+  "exposure": 0.88,
+  "lunar_L": 0.62,
+  "ambient": 0.02,
+  "distance": 6.0,
+  "fov_deg": 23.0,
+  "star_seed": 3
+}

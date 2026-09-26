@@ -1,0 +1,59 @@
+planetgen: preset=vesta seed=11 1024x512 radius=262 km
+[   0.0s] global shape and ancient crust
+[   3.7s] crustal provinces
+[   4.0s] palimpsests: ghosts of the earliest bombardment
+    palimpsests: 35
+[   4.2s] multi-ring basins (4)
+[   5.4s]     basin 1: D=309 km depth=4.8 km rings=2 flood=0.00
+[   5.8s]     basin 2: D=266 km depth=4.5 km rings=2 flood=0.00
+[   6.2s]     basin 3: D=225 km depth=5.8 km rings=3 flood=0.00
+[   6.7s]     basin 4: D=391 km depth=7.3 km rings=2 flood=0.00
+[   6.7s] giant basin aftermath
+    giant ejecta blankets: 4
+    antipodal disruption zones: 4
+[   7.2s] basin rim massif belts
+    basin rim massif belts: 4
+[   8.5s] large craters (22)
+[   8.7s]     22 placed, 14-134 km (4 giant)
+[   8.7s] surface age provinces
+[   8.8s] pre-mare basins-era: 128 craters, 6.00-210 km
+    pre-mare basins-era: 0/87    pre-mare basins-era: 4/87    pre-mare basins-era: 8/87    pre-mare basins-era: 12/87    pre-mare basins-era: 16/87    pre-mare basins-era: 20/87    pre-mare basins-era: 24/87    pre-mare basins-era: 28/87    pre-mare basins-era: 32/87    pre-mare basins-era: 36/87    pre-mare basins-era: 40/87    pre-mare basins-era: 44/87    pre-mare basins-era: 48/87    pre-mare basins-era: 52/87    pre-mare basins-era: 56/87    pre-mare basins-era: 60/87    pre-mare basins-era: 64/87    pre-mare basins-era: 68/87    pre-mare basins-era: 72/87    pre-mare basins-era: 76/87    pre-mare basins-era: 80/87    pre-mare basins-era: 84/87    pre-mare basins-era: 87 placed        
+[   9.1s] pre-mare heavy bombardment: 12444 craters, 3.54-52 km
+    pre-mare heavy bombardment: 0/7730    pre-mare heavy bombardment: 386/7730    pre-mare heavy bombardment: 772/7730    pre-mare heavy bombardment: 1158/7730    pre-mare heavy bombardment: 1544/7730    pre-mare heavy bombardment: 1930/7730    pre-mare heavy bombardment: 2316/7730    pre-mare heavy bombardment: 2702/7730    pre-mare heavy bombardment: 3088/7730    pre-mare heavy bombardment: 3474/7730    pre-mare heavy bombardment: 3860/7730    pre-mare heavy bombardment: 4246/7730    pre-mare heavy bombardment: 4632/7730    pre-mare heavy bombardment: 5018/7730    pre-mare heavy bombardment: 5404/7730    pre-mare heavy bombardment: 5790/7730    pre-mare heavy bombardment: 6176/7730    pre-mare heavy bombardment: 6562/7730    pre-mare heavy bombardment: 6948/7730    pre-mare heavy bombardment: 7334/7730    pre-mare heavy bombardment: 7720/7730    pre-mare heavy bombardment: 7730 placed        
+[  12.3s] chaos terrain
+[  12.7s] fracture networks
+    fractures: generation 1 (freq 3.5) covers 11.3%
+    fractures: generation 2 (freq 8.0) covers 8.4%
+    fractures: generation 3 (freq 19.0) covers 5.6%
+[  13.9s] rifting: 3 canyon systems
+[  14.1s] lobate scarps: 2
+[  14.2s] layered deposits
+[  14.3s] post-mare: 3080 craters, 3.54-31 km
+    post-mare: 0/1950    post-mare: 97/1950    post-mare: 194/1950    post-mare: 291/1950    post-mare: 388/1950    post-mare: 485/1950    post-mare: 582/1950    post-mare: 679/1950    post-mare: 776/1950    post-mare: 873/1950    post-mare: 970/1950    post-mare: 1067/1950    post-mare: 1164/1950    post-mare: 1261/1950    post-mare: 1358/1950    post-mare: 1455/1950    post-mare: 1552/1950    post-mare: 1649/1950    post-mare: 1746/1950    post-mare: 1843/1950    post-mare: 1940/1950    post-mare: 1950 placed        
+[  14.8s] recent: 448 craters, 3.54-18 km
+    recent: 0/281    recent: 14/281    recent: 28/281    recent: 42/281    recent: 56/281    recent: 70/281    recent: 84/281    recent: 98/281    recent: 112/281    recent: 126/281    recent: 140/281    recent: 154/281    recent: 168/281    recent: 182/281    recent: 196/281    recent: 210/281    recent: 224/281    recent: 238/281    recent: 252/281    recent: 266/281    recent: 280/281    recent: 281 placed        
+[  14.8s] young basins (1)
+[  15.9s]     D=211 km depth=4.9 km rings=4 freshness=0.96
+[  15.9s] young rayed giants (3)
+[  15.9s]     D=10 km freshness=0.92
+[  15.9s]     D=15 km freshness=0.92
+[  15.9s]     D=8 km freshness=0.93
+[  15.9s] secondary crater fields around 6 young impacts
+[  15.9s] crater modification
+    floor-fractured craters: 4
+    impact melt ponds: 11
+    concentric craters: 5
+[  15.9s] mid-scale surface texture
+[  16.2s] micro relief
+[  16.5s] surface processes
+    mass wasting: 0/16    mass wasting: 8/16    mass wasting: 16 iterations   
+[  16.9s] crater detail (7 octaves of analytic crater noise)
+[  25.9s] relief clamped: 57.6 km -> 29.9 km (cap is 12% of radius)
+[  25.9s] albedo and colour
+    ray systems: 12 craters
+    bright central peaks: 8
+    polar frost: 11.14% of the surface
+    slope streaks on 66.2% of the surface
+[  32.0s] writing maps to C:/Users/ofici/Downloads/BSP/tools/vesta_raw/v11
+[  32.3s] done: elevation range -22.64 km to 7.22 km (29.87 km relief)
+output -> C:\Users\ofici\Downloads\BSP\tools\vesta_raw\v11

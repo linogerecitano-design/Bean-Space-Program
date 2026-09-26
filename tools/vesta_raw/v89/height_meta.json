@@ -1,0 +1,12 @@
+{
+  "min_km": -20.19233512878418,
+  "max_km": 9.728677749633789,
+  "range_km": 29.92101287841797,
+  "encoding": "linear 16-bit, height_km = min_km + value/65535 * range_km",
+  "projection": "equirectangular, row 0 = +90 lat, col 0 = -180 lon",
+  "name": "vesta",
+  "seed": 89,
+  "radius_km": 262.0,
+  "width": 1024,
+  "height": 512
+}
