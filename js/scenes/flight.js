@@ -170,8 +170,8 @@ export class FlightScene {
     const sasModes = h('div.hud-btns', {}, ['stability', 'prograde', 'retrograde', 'normal', 'antinormal', 'radial', 'antiradial', 'target', 'maneuver'].map(m => B('sas_' + m, { stability: 'Hold', prograde: 'Pro', retrograde: 'Retro', normal: 'Nrm', antinormal: 'A-Nrm', radial: 'Rad', antiradial: 'A-Rad', target: 'Tgt', maneuver: 'Node' }[m], () => { this.vessel.sas = true; this.vessel.sasMode = m; this.vessel.sasHold = null; })));
     const main = h('div.hud-btns', {},
       B('sas', 'SAS', () => { this.vessel.sas = !this.vessel.sas; this.vessel.sasHold = null; }), h('button.sas-toggle', { onclick: () => document.body.classList.toggle('show-sas') }, 'Modes'), B('rcs', 'RCS', () => this.vessel.rcs = !this.vessel.rcs),
-      B('map', 'MAP', () => this.toggleMap()), B('cam', 'CAM', () => this.cycleCam()), B('eva', 'EVA', () => this.eva()), B('flag', 'Flag', () => this.plantFlag()),
-      B('node', 'Maneuver', () => this.nodePanel()), B('panels', 'Panels', () => this.togglePanels()), B('warpd', 'Warp drive', () => this.toggleWarpDrive()), B('menu', '☰', () => this.pauseMenu()),
+      B('map', 'MAP', () => this.toggleMap()), B('cam', 'CAM', () => this.cycleCam()), B('eva', 'EVA', () => this.eva(), '.opt'), B('flag', 'Flag', () => this.plantFlag(), '.opt'),
+      B('node', 'Maneuver', () => this.nodePanel(), '.opt'), B('panels', 'Panels', () => this.togglePanels(), '.opt'), B('warpd', 'Warp drive', () => this.toggleWarpDrive(), '.opt'), B('menu', '☰', () => this.pauseMenu()),
       B('more', '⋯', () => document.body.classList.toggle('hud-more')));
     const left = h('div.col', {}, sasModes); const right = h('div.col', {}, main);
     // on phones the telemetry collapses to the essentials; tap it for the full readout

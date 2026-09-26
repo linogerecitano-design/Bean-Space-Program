@@ -116,36 +116,64 @@ table.kv { width: 100%; border-collapse: collapse; font-size: 12px; } table.kv t
 .tag.fic { background: rgba(245,158,11,.2); color: #fde68a; }
 
 @media (max-width: 760px) {
-  #hud-top, #hud-orbit { font-size: 11px; min-width: 0; padding: 6px 8px; }
-  #hud-top .big { font-size: 16px; }
-  #navball { width: 130px; height: 130px; }
-  #hud-stage { display: none; }
   #vab-left { width: 46vw; top: 56px; } #vab-right { width: 50vw; top: 56px; font-size: 11px; }
   .part .b { display: none; }
   .part-icon { width: 40px; height: 40px; }
   .vab-hint { display: none; }
   #menu { padding: 16px; }
+  #topbar { top: 4px; }
 }
 @media (pointer: fine) { #stick, #rollbtns { display: none; } }
 .sas-toggle { display: none; }
-@media (max-width: 760px) {
-  #hud-bottom { left: 50%; bottom: 10px; }
-  #navball { width: 104px; height: 104px; }
-  #hud-bottom > .col { position: fixed; top: 132px; }
-  #hud-bottom > .col:first-child { left: 6px; display: none; }
-  body.show-sas #hud-bottom > .col:first-child { display: flex; }
-  #hud-bottom > .col:last-child { right: 6px; }
-  #hud-bottom .hud-btns { flex-direction: column; max-width: 76px; }
-  #hud-bottom .hud-btns button { padding: 7px 6px; font-size: 11px; min-width: 64px; }
-  .sas-toggle { display: inline-block; }
-  #stick { left: 10px; bottom: 12px; width: 118px; height: 118px; }
-  #stick .knob { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
-  #rollbtns { left: 10px; bottom: 182px; flex-direction: row; }
-  #rollbtns button { width: 48px; height: 40px; }
-  #throttle { right: 10px; bottom: 12px; width: 44px; height: 150px; }
-  #stagebtn { right: 8px; bottom: 190px; width: 66px; height: 66px; font-size: 13px; }
-  #hud-stage { display: none; }
-  #warpbar { top: auto; bottom: 124px; }
-  #warpbar button { padding: 4px 7px; }
-  #topbar { top: 4px; }
-}
+.conly { display: none; }
+
+/* ---- compact flight HUD: phones in either orientation (body.compact is set in main.js) ----
+   Only the essentials stay on screen; tap the telemetry for the full readout (hud-exp) and ⋯ for
+   the rarely used buttons and the staging list (hud-more). */
+body.compact .hud-btns button { padding: 6px 8px; font-size: 12px; min-height: 32px; }
+body.compact #hud-top { top: max(6px, env(safe-area-inset-top)); left: max(6px, env(safe-area-inset-left)); padding: 5px 8px; min-width: 0; font-size: 11px; line-height: 1.3; cursor: pointer; }
+body.compact #hud-top .big { font-size: 17px; line-height: 1.1; }
+body.compact .xtra { display: none; }
+body.compact.hud-exp .xtra { display: block; }
+body.compact .conly { display: block; }
+body.compact #hud-orbit { display: none; }
+body.compact.hud-exp #hud-orbit { display: block; top: auto; right: auto; left: max(6px, env(safe-area-inset-left)); bottom: 12px; min-width: 0; font-size: 11px; padding: 5px 8px; z-index: 2; }
+body.compact #hud-stage { display: none; }
+body.compact.hud-more #hud-stage { display: block; right: max(6px, env(safe-area-inset-right)); top: 150px; bottom: auto; width: 180px; max-height: 42vh; z-index: 2; }
+body.compact #warpbar { top: max(6px, env(safe-area-inset-top)); bottom: auto; padding: 3px; gap: 2px; }
+body.compact #warpbar button { padding: 3px 7px; font-size: 12px; }
+body.compact #warpbar > span { min-width: 44px !important; font-size: 12px; }
+body.compact #msg { font-size: 15px; top: 30%; width: 90vw; }
+/* navball alone at the bottom centre; the two button groups are pulled out of the row */
+/* no transform here: it would make the fixed-position button groups relative to this row */
+body.compact #hud-bottom { left: 0; right: 0; transform: none; justify-content: center; bottom: max(8px, env(safe-area-inset-bottom)); gap: 0; pointer-events: none; }
+body.compact #hud-bottom > * { pointer-events: auto; }
+body.compact #navball { width: 100px; height: 100px; }
+body.compact #hud-bottom > .col { position: fixed; }
+body.compact #hud-bottom > .col:last-child { top: 52px; right: max(6px, env(safe-area-inset-right)); }
+body.compact #hud-bottom > .col:last-child .hud-btns { display: grid; grid-template-columns: repeat(2, auto); max-width: none; justify-content: end; }
+body.compact:not(.hud-more) .hud-btns button.opt { display: none !important; }
+body.compact .sas-toggle { display: inline-block; }
+/* SAS modes: hidden until "Modes" is tapped, then a row above the navball */
+body.compact #hud-bottom > .col:first-child { display: none; left: 50%; transform: translateX(-50%); bottom: 120px; width: max-content; max-width: 92vw; }
+body.compact.show-sas #hud-bottom > .col:first-child { display: flex; }
+body.compact #hud-bottom > .col:first-child .hud-btns { flex-direction: row; flex-wrap: wrap; justify-content: center; max-width: min(92vw, 420px); }
+/* touch flight controls */
+body.compact #stick { left: max(10px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); width: 112px; height: 112px; }
+body.compact #stick .knob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
+body.compact #rollbtns { left: max(10px, env(safe-area-inset-left)); bottom: 134px; flex-direction: row; gap: 6px; }
+body.compact #rollbtns button { width: 50px; height: 36px; }
+body.compact #throttle { right: max(10px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); width: 44px; height: 140px; }
+body.compact #stagebtn { right: 64px; bottom: max(12px, env(safe-area-inset-bottom)); width: 64px; height: 64px; font-size: 13px; }
+/* landscape phones are short: the buttons sit higher and the SAS row lower */
+body.compact:not(.portrait) #hud-bottom > .col:last-child { top: 44px; }
+body.compact:not(.portrait) #hud-bottom > .col:first-child { bottom: 112px; }
+body.compact:not(.portrait) #hud-bottom > .col:last-child .hud-btns { grid-template-columns: repeat(3, auto); }
+/* portrait: telemetry takes the top-left, so the warp bar moves right and the buttons stack under it */
+body.compact.portrait #warpbar { left: auto; right: max(6px, env(safe-area-inset-right)); transform: none; }
+body.compact.portrait #hud-bottom > .col:last-child { top: 48px; }
+body.compact.portrait #stagebtn { right: 10px; bottom: 190px; }
+body.compact.portrait #hud-bottom > .col:first-child { top: 104px; bottom: auto; left: max(6px, env(safe-area-inset-left)); transform: none; }
+body.compact.portrait #hud-bottom > .col:first-child .hud-btns { justify-content: flex-start; max-width: 58vw; }
+body.compact.portrait #navball { width: 110px; height: 110px; }
+body.compact.portrait.hud-more #hud-stage { top: 230px; }
