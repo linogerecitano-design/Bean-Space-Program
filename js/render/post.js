@@ -129,6 +129,8 @@ export class Pipeline {
           float n = textureLod(uNoise, d * 1.7, 0.0).r * 0.55 + textureLod(uNoise, d * 5.3 + 0.3, 0.0).r * 0.3 + textureLod(uNoise, d * 13.0, 0.0).g * 0.15;
           return vec4(smoothstep(1.0 - A.coverage - 0.15, 1.0 - A.coverage + 0.25, n), 0.0, 0.0, 0.2);
         }
+        // the band colour under a gas giant's cloud (its albedo map, or the base band tint before it is baked)
+        vec3 gasBand(Atmo A, vec3 dirB, float lod) { return A.cloudTex > 0.5 ? layersAt(A, dirB, lod).rgb : A.cloudColor; }
         float density(Atmo A, vec3 p, out float hf) {
           vec3 q = A.w2b * (p - A.C); float r = length(q); vec3 d = q / r; dCam = length(p);
           hf = clamp((r - A.Rb) / (A.Rt - A.Rb), 0.0, 1.0);
@@ -161,6 +163,18 @@ export class Pipeline {
             float fib = nz(vec3(q.x / 30000.0, q.y / 4000.0, q.z / 30000.0) + uTime * 0.001, 11000.0).b;
             float cirrus = clamp(L.b * profC * (fib * 1.4 - 0.3), 0.0, 1.0) * 0.18;
             return max(base, max(anvil, cirrus));
+          }
+          if (A.stack > 3.5) { // gas giant: rounded convective cloud heads and thunderhead towers over the band deck
+            float lum = dot(gasBand(A, d, lod), vec3(0.3, 0.5, 0.2));
+            float cov = clamp(A.coverage + (lum - 0.5) * 1.6, 0.15, 0.92);      // bright zones: thick ammonia decks
+            float scale = thick * 1.8; vec3 qs = d * A.Rb; vec3 gw = wind * 25.0;
+            float shape = nz((qs + gw) / scale, scale).r * 0.7 + nz((qs + gw) / (scale * 0.45), scale * 0.45).g * 0.3;
+            float m = clamp((shape - (1.0 - cov) * 0.85) / max(1.0 - (1.0 - cov) * 0.85, 0.05), 0.0, 1.0);
+            float storm = smoothstep(0.55, 0.78, nz(qs / (scale * 8.0), scale * 8.0).b); // scattered towering storms
+            float top = (0.22 + 0.72 * storm) * sqrt(m);                          // sqrt: domed, cauliflower tops
+            float prof = smoothstep(0.0, 0.04, hf) * (1.0 - smoothstep(top - 0.07, top + 0.01, hf));
+            float det = nz((q + gw * 1.3) / (scale * 0.12), scale * 0.12).g * 0.6 + nz((q + gw) / (scale * 0.045), scale * 0.045).r * 0.4;
+            return clamp(prof * 1.7 - (1.0 - det) * (0.3 + 0.45 * hf), 0.0, 1.0); // billowy edges, wispier higher up
           }
           if (A.stack > 1.5 && A.stack < 2.5) { // Venus: mottled lower deck under an unbroken upper deck
             float lower = L.r * (1.0 - smoothstep(0.35, 0.5, hf)) * (0.7 + 0.3 * nz(q / 60000.0 + uTime * 0.002, 60000.0).r);
@@ -196,6 +210,7 @@ export class Pipeline {
         // Distant clouds: a single textured shell at mid-deck height, lit with a soft terminator
         // and self-shadowing. Cheap, and free of the sampling noise a coarse raymarch has.
         vec4 clouds2D(Atmo A, vec3 rd, float sd, vec3 sunT, float tMin) {
+          if (A.stack > 3.5) return vec4(0.0);
           float Rm = mix(A.Rb, A.Rt, 0.35); float c2 = dot(A.C, A.C) - Rm * Rm;
           vec2 tm = raySphere(rd, A.C, c2); if (tm.y < 0.0 || tm.x > 1e29) return vec4(0.0);
           float t = tm.x > 0.0 ? tm.x : tm.y;
@@ -228,12 +243,20 @@ export class Pipeline {
           return vec4(c * a, a);
         }
         void main() {
-          vec3 rd = viewRay(vUv);
-          float sd = sceneDist(vUv, rd);
+          vec3 rd0 = viewRay(vUv);
+          float sd0 = sceneDist(vUv, rd0);
           vec3 col = vec3(0.0); float T = 1.0;
           for (int ai = 0; ai < ${MAX_ATMO}; ai++) {
             if (ai >= uNumA) break;
             Atmo A = uA[ai]; if (A.hasClouds < 0.5) continue;
+            // oblate planets: march in pole-stretched space, where the flattened planet and its cloud shells are spheres
+            vec3 rd = rd0; float sd = sd0;
+            if (A.oblate > 0.0) {
+              float kx = 1.0 / (1.0 - A.oblate) - 1.0; vec3 n = A.pole;
+              rd = rd0 + kx * dot(rd0, n) * n; float Lk = length(rd); rd /= Lk;
+              A.C += kx * dot(A.C, n) * n; float c2 = dot(A.C, A.C); A.cG = c2 - A.R * A.R; A.cB = c2 - A.Rb * A.Rb; A.cT = c2 - A.Rt * A.Rt;
+              sd = sd0 < 1e29 ? sd0 * Lk : sd0;
+            }
             vec2 to = raySphere(rd, A.C, A.cT), ti = raySphere(rd, A.C, A.cB), tg = raySphere(rd, A.C, A.cG);
             if (to.y < 0.0 || to.x > 1e29) continue;
             float t0 = max(to.x, 0.0), t1 = to.y;
@@ -276,7 +299,9 @@ export class Pipeline {
                   float shade = smoothstep(-0.08, 0.05, up);
                   vec3 lightC = uSunColor * sunT * shade * (Tsun * phase * mix(1.0, powder * 2.0, 0.35) * 0.55 + amb * (0.6 + 0.8 * hf) * 1.5);
                   float Ti = exp(-d * sigma * dt);
-                  c3 += T3 * (1.0 - Ti) * lightC * A.cloudColor;
+                  vec3 tint = A.cloudColor;
+                  if (A.stack > 3.5) { vec3 dq = normalize(A.w2b * (p - A.C)); tint = mix(gasBand(A, dq, 1.0) * 1.2, vec3(1.0, 0.97, 0.92), 0.25 + 0.45 * hf); } // whiter ammonia-ice tops
+                  c3 += T3 * (1.0 - Ti) * lightC * tint;
                   T3 *= Ti;
                 }
               }

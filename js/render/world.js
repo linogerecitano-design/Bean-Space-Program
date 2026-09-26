@@ -6,7 +6,7 @@ import { makeGasMaterial, makeStarMaterial, makeGlowSprite, makeRings, BodyPoint
 import { Pipeline } from './post.js';
 import { Sky } from './sky.js';
 import { Scatter, scatterTime, setFoliageAA } from './scatter.js';
-import { planetTexture, PLANET_EXTRA, IS_MOBILE, getGroundArrays } from './textures.js';
+import { planetTexture, PLANET_EXTRA, PLANET_MAPS, IS_MOBILE, getGroundArrays } from './textures.js';
 import { blackbody } from './glsl.js';
 import { requestBake, prefetchSystem, bakeListeners } from '../gen/baker.js';
 import { GasGiantBaker } from '../gen/gasgiant.js';
@@ -277,7 +277,13 @@ export class World {
   }
   cloudRot(b) { const cl = this.cloudsFor(b); if (!cl) return 0; return (this.t * (cl.speed || 10) / b.radius) % (Math.PI * 2); }
   cloudsFor(b) {
-    const st = b.style; if (!st || !st.clouds) return null;
+    const st = b.style;
+    if (b.isGas) { // gas giants: a 3D deck of convective cloud towers over the banded deck, tinted by the bands
+      if (!b._clouds) b._clouds = { coverage: 0.5, color: (st && st.bands && st.bands[0]) || [0.85, 0.75, 0.6], height: 0, thickness: 140000 * Math.min(1.5, Math.max(0.5, b.radius / 7e7)), opaque: false, speed: 0, stack: 4 };
+      if (!b._clouds.map) { const v = this.visuals.get(b); b._clouds.map = b.sys.real && PLANET_MAPS[b.name] ? planetTexture(PLANET_MAPS[b.name]) : (v && v.gg && v.gg.ready && v.gg.albedo) || null; }
+      return b._clouds;
+    }
+    if (!st || !st.clouds) return null;
     if (!b._clouds) {
       b._clouds = { ...st.clouds };
       if (b.name === 'Earth' && b.sys.real) b._clouds.map = planetTexture(PLANET_EXTRA.Earth.clouds, false);

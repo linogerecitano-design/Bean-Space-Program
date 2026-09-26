@@ -108,7 +108,9 @@ function patchFoliage(mat, strength) {
       #ifdef ALPHA_TO_COVERAGE
       diffuseColor.a = smoothstep(0.3, 0.55, diffuseColor.a); // crisp cut-outs: soft alpha dithers into grain
       #endif
-      #include <alphatest_fragment>`);
+      #include <alphatest_fragment>`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      if (any(isnan(normal)) || dot(normal, normal) < 1e-6) normal = vec3(0.0, 0.0, 1.0); // never light with a broken normal`);
   };
   mat.customProgramCacheKey = () => 'foliage' + strength;
   mat.alphaToCoverage = foliageAA; foliageMats.add(mat);
@@ -146,6 +148,9 @@ async function loadModel(t) {
     // cut-out card without any alpha: it would draw as a solid quad, so the model is left out
     if (foliage && (m.alphaTest > 0 || m.transparent) && m.map && !hasAlpha(m.map)) broken = true;
     if (t.kind !== 'rock') { mat.side = THREE.DoubleSide; mat.alphaTest = Math.max(0.4, m.alphaTest || 0); mat.transparent = false; }
+    // no normal maps on foliage: on thin leaf and blade cards the screen-space tangent frame underflows in
+    // mobile GPU precision and turns the lighting NaN (black plants); the bump is invisible at this size anyway
+    if (foliage || t.kind === 'grass' || t.kind === 'tree' || t.kind === 'shrub') mat.normalMap = null;
     if (t.kind !== 'rock' && t.kind !== 'debris') patchFoliage(mat, t.kind === 'tree' ? 0.0025 : t.kind === 'grass' ? 0.06 : 0.02);
     else if (foliage) patchFoliage(mat, 0);
     mat.envMapIntensity = 0.4;
