@@ -152,7 +152,13 @@ export class MissionScene {
     for (const g of this.givers) g.state = g === a ? 'talk' : g.giver.idle;
     this.focusOn = a; this.buildUI(); this.say(a, `“${a.giver.line}”`, c.title);
   }
-  say(a, line, sub) { if (!a) return; this.speaker = a; this.bubble.replaceChildren(h('b', {}, a.giver.name), h('div', {}, line), sub ? h('div.small.dim', {}, sub) : null); this.bubble.style.display = ''; clearTimeout(this.sayT); this.sayT = setTimeout(() => { this.bubble.style.display = 'none'; this.speaker = null; }, 6000); }
+  placeBubble() {
+    if (!this.speaker || !this.bubble || this.bubble.style.display === 'none') return;
+    const p = this.speaker.group.position.clone(); p.y += 1.85; p.project(this.camera);
+    const x = Math.max(90, Math.min(innerWidth - 90, (p.x + 1) / 2 * innerWidth)), y = Math.max(110, (1 - p.y) / 2 * innerHeight);
+    this.bubble.style.left = x + 'px'; this.bubble.style.top = y + 'px';
+  }
+  say(a, line, sub) { if (!a) return; this.speaker = a; this.bubble.replaceChildren(h('b', {}, a.giver.name), h('div', {}, line), sub ? h('div.small.dim', {}, sub) : null); this.bubble.style.display = ''; clearTimeout(this.sayT); this.sayT = setTimeout(() => { this.bubble.style.display = 'none'; this.speaker = null; }, 6000); this.placeBubble(); }
   react(a, state, ms) { if (!a) return; a.state = state; clearTimeout(a._rt); a._rt = setTimeout(() => { a.state = a.giver.idle; }, ms); }
   accept(c) {
     const g = this.G.game; if (g.contracts.active.length >= 5) return flash('You can only run 5 contracts at once');
@@ -191,10 +197,7 @@ export class MissionScene {
     if (this.spot) { const a = this.focusOn; this.spot.intensity += ((a ? 60 : 0) - this.spot.intensity) * Math.min(1, dt * 4); if (a) { this.spot.target.position.copy(a.group.position); this.spot.position.set(a.group.position.x, this.level ? 7 : 3.1, a.group.position.z + 2); } }
     if ((this.scrT = (this.scrT || 0) + dt) > (this.level ? 0.2 : 2)) { this.scrT = 0; this.drawScreen(); }
     // speech bubble follows the speaker's head
-    if (this.speaker && this.bubble.style.display !== 'none') {
-      const p = this.speaker.group.position.clone(); p.y += 1.85; p.project(this.camera);
-      this.bubble.style.left = ((p.x + 1) / 2 * innerWidth) + 'px'; this.bubble.style.top = ((1 - p.y) / 2 * innerHeight) + 'px';
-    }
+    this.placeBubble();
     this.G.world.pipeline.render(this.scene, this.camera, { time: 0, sunDir: new THREE.Vector3(0, 1, 0), sunColor: new THREE.Vector3(1, 1, 1), atmos: [], exposure: 1.0, sss: false });
   }
 }
