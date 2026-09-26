@@ -54,7 +54,7 @@ export class FlightScene {
   }
   // ------------------------------------------------------------------ enter / exit
   async enter(params) {
-    const G = this.G; this.active = true; this.cam.enabled = true;
+    const G = this.G; this.active = true; this.cam.enabled = true; this.dead = false; this.leaving = false;
     this.warpI = 0; this.mapMode = false; this.plan = null; this.debris = []; this.others = [];
     this.throttleTouch = null; this.hudT = 0; this.camMode = 'chase';
     if (params.design) {
@@ -67,7 +67,10 @@ export class FlightScene {
       for (const n of crew) { const a = G.game.roster.find(r => r.name === n); if (a) a.status = 'flying'; }
       v.crew = crew;
       this.place(v, params.where || 'pad');
-      this.vessel = v; G.game.vessels.push(v.serialize()); G.game.activeVessel = v.id;
+      // reverting: drop whatever the previous attempt of this launch left behind (vessel or debris)
+      if (params.launchId) G.game.vessels = G.game.vessels.filter(x => x.launchId !== params.launchId);
+      params.launchId ||= 'L' + Date.now().toString(36);
+      this.vessel = v; v.launchId = params.launchId; G.game.vessels.push({ ...v.serialize(), launchId: params.launchId }); G.game.activeVessel = v.id;
     } else if (params.vesselId) {
       const d = G.game.vessels.find(x => x.id === params.vesselId);
       if (d.starId && d.starId !== G.sys.starId) G.setSystem(d.starId); else if (!d.starId) G.setSystem('sol');
@@ -98,8 +101,8 @@ export class FlightScene {
   persist() {
     const G = this.G, v = this.vessel; if (!v || !G.game) return;
     const d = v.serialize(); d.starId = G.sys.starId; d.t = G.t;
-    const i = G.game.vessels.findIndex(x => x.id === v.id); if (i >= 0) G.game.vessels[i] = d; else G.game.vessels.push(d);
-    for (const o of this.others || []) { const k = G.game.vessels.findIndex(x => x.id === o.v.id); if (k >= 0) { const od = o.v.serialize(); od.starId = G.sys.starId; od.t = G.t; G.game.vessels[k] = od; } }
+    const i = G.game.vessels.findIndex(x => x.id === v.id); d.launchId = v.launchId || (i >= 0 ? G.game.vessels[i].launchId : undefined); if (i >= 0) G.game.vessels[i] = d; else G.game.vessels.push(d);
+    for (const o of this.others || []) { const k = G.game.vessels.findIndex(x => x.id === o.v.id); if (k >= 0) { const od = o.v.serialize(); od.starId = G.sys.starId; od.t = G.t; od.launchId = G.game.vessels[k].launchId; G.game.vessels[k] = od; } }
     G.game.t = G.t;
   }
   place(v, where) {
@@ -315,8 +318,8 @@ export class FlightScene {
     if (r === 'tp') this.teleportDialog();
     if (r === 'gfx') graphicsDialog();
     if (r === 'recover') this.recover();
-    if (r === 'revert') { this.removeVessel(); G.go('flight', this.launchParams); }
-    if (r === 'vab') { this.removeVessel(); G.go('vab'); }
+    if (r === 'revert') { this.removeVessel(); this.leave(['flight', this.launchParams]); }
+    if (r === 'vab') { this.removeVessel(); this.leave(['vab']); }
     if (r === 'track') G.go('tracking');
     if (r === 'center') G.go('center');
   }
@@ -539,7 +542,7 @@ export class FlightScene {
   // ------------------------------------------------------------------ simulation
   absPos() { const v = this.vessel; return v.body.posAt(this.G.t).clone().add(v.r); }
   update(dt) {
-    if (!this.active || !this.vessel) return;
+    if (!this.active || !this.vessel || this.dead) return;
     const G = this.G, v = this.vessel;
     this.handleInput(dt);
     const warp = WARPS[this.warpI];
@@ -885,6 +888,7 @@ export class FlightScene {
   }
   async crash() {
     const G = this.G, v = this.vessel;
+    if (!v || this.dead) return; // already showing the "destroyed" dialog: never stack a second one
     this.explosion(v.r.clone(), v.body, Math.max(8, v.height));
     for (const p of v.livingParts()) if (p.broken) p.attached = false;
     const cmd = v.livingParts().some(p => p.part.crew || p.part.probe);
@@ -897,7 +901,13 @@ export class FlightScene {
     const r = await modal('Vessel destroyed', `${v.name} was destroyed${v.crew.length ? '. The crew (' + v.crew.join(', ') + ') did not survive — use Revert to undo.' : '.'}`, [this.launchParams ? { label: 'Revert to launch', value: 'revert', primary: true } : null, this.launchParams ? { label: 'Revert to VAB', value: 'vab' } : null, { label: 'Space Centre', value: 'center' }].filter(Boolean));
     if (r === 'revert' || r === 'vab') for (const n of v.crew) { const a = G.game.roster.find(x => x.name === n); if (a) a.status = 'available'; }
     this.vessel = null;
-    if (r === 'revert') G.go('flight', this.launchParams); else if (r === 'vab') G.go('vab'); else G.go('center');
+    this.leave(r === 'revert' ? ['flight', this.launchParams] : r === 'vab' ? ['vab'] : ['center']);
+  }
+  // leave the flight exactly once (a second tap on Revert used to launch a second copy of the rocket)
+  leave([scene, params]) {
+    if (this.leaving) return; this.leaving = true;
+    document.querySelectorAll('.modal-bg').forEach(m => m.remove());
+    this.G.go(scene, params);
   }
   // ------------------------------------------------------------------ rendering
   render(dt, fxWarp = 1) {
