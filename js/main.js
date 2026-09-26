@@ -16,6 +16,8 @@ import { FlightScene } from './scenes/flight.js';
 import { TrackingScene } from './scenes/tracking.js';
 import { GalaxyScene } from './scenes/galaxy.js';
 import { AstronautScene } from './scenes/astronauts.js';
+import { RnDScene } from './scenes/rnd.js';
+import { MissionScene } from './scenes/mission.js';
 
 const G = window.BSP = {
   world: null, game: null, scene: null, scenes: {}, t: START_T, sys: null, mobile: IS_MOBILE,
@@ -65,7 +67,7 @@ async function boot() {
   // saves: prefer the newest of local and cloud
   const local = loadLocal(); const remote = await cloud.load();
   G.game = [local, remote].filter(Boolean).sort((a, b) => (b.updated || 0) - (a.updated || 0))[0] || null;
-  G.scenes = { menu: new MenuScene(G), center: new SpaceCenterScene(G), vab: new VABScene(G), flight: new FlightScene(G), tracking: new TrackingScene(G), galaxy: new GalaxyScene(G), astronauts: new AstronautScene(G) };
+  G.scenes = { menu: new MenuScene(G), center: new SpaceCenterScene(G), vab: new VABScene(G), flight: new FlightScene(G), tracking: new TrackingScene(G), galaxy: new GalaxyScene(G), astronauts: new AstronautScene(G), rnd: new RnDScene(G), mission: new MissionScene(G) };
   document.getElementById('loading').remove();
   const qs = new URLSearchParams(location.search);
   if (qs.get('scene')) { if (!G.game) G.game = newGame('sandbox'); G.t = G.game.t; const sc = qs.get('scene'); await G.go(sc, sc === 'flight' ? { design: G.game.designs[+(qs.get('d') || 1)], where: qs.get('where') || 'pad', crew: [G.game.roster[0].name] } : { starId: qs.get('star') || undefined, focus: qs.get('focus') || undefined }); } else await G.go('menu');

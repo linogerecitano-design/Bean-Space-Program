@@ -38,3 +38,11 @@ export function modal(title, body, buttons = [{ label: 'Close' }]) {
   });
 }
 export function progress(el, f) { el.querySelector('i').style.width = (f * 100).toFixed(0) + '%'; }
+// stacked notification cards (achievements, contracts, science) that slide in and fade out
+export function toast(title, text = '', kind = '', ms = 4500) {
+  let box = document.getElementById('toasts');
+  if (!box) { box = h('div#toasts'); document.body.append(box); }
+  const el = h('div.toast' + (kind ? '.' + kind : ''), {}, h('b', {}, title), text ? h('div', {}, text) : null);
+  box.append(el); while (box.children.length > 4) box.firstChild.remove();
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 600); }, ms);
+}

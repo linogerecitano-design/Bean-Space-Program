@@ -276,3 +276,85 @@ function mergeByMaterial(group) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------- career starter site
+// "Bean Field": a gravel launch mound with a short service tower, an arched tin hangar, portakabin
+// offices, a caravan for the crew, a second-hand tracking dish and a garden-shed observatory, all
+// within a few hundred metres of the pad (same pad height and launch mount as Pad 39B, so launch
+// physics are identical).
+export const STARTER_SPOTS = { pad: [0, 40, 0], rnd: [-22, 10, 180], vab: [-170, 26, 120], mission: [-115, 12, 215], astronauts: [-215, 8, 205], tracking: [-80, 18, 290], observatory: [-270, 14, 280] };
+export const FULL_SPOTS = { pad: [0, 60, 0], vab: [-1500, 90, 900], mission: [-1200, 20, 1250], rnd: [-1900, 32, -300], astronauts: [-2300, 20, 400], tracking: [-2600, 40, -700], observatory: [-3100, 30, 300] };
+export const PAD_RADIUS = [30, 100]; // hardstand radius per facility level (contact physics)
+let STARTER_M = null;
+function starterMats() {
+  if (STARTER_M) return STARTER_M;
+  const tin = canvasTex(256, 256, (g, w, h) => {
+    for (let x = 0; x < w; x += 8) { const k = 0.5 + 0.5 * Math.sin(x / 8 * Math.PI); g.fillStyle = `rgb(${120 + k * 40},${124 + k * 40},${126 + k * 38})`; g.fillRect(x, 0, 8, h); }
+    for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(${110 + Math.random() * 40},${60 + Math.random() * 30},20,${Math.random() * 0.25})`; g.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 6, 6 + Math.random() * 40); } // rust streaks
+  });
+  const sign = canvasTex(512, 128, (g, w, h) => { g.fillStyle = '#f2ecd8'; g.fillRect(0, 0, w, h); g.fillStyle = '#7a2a18'; g.font = 'bold 72px Arial'; g.fillText('BEAN FIELD', 40, 88); g.fillStyle = '#2a5a2a'; g.font = 'bold 22px Arial'; g.fillText('LAUNCH SITE · EST. YESTERDAY', 60, 118); });
+  const cabin = canvasTex(256, 128, (g, w, h) => { speckle(g, w, h, 0xe6e2d6, 12); g.fillStyle = '#2a3a48'; for (let x = 20; x < w; x += 70) g.fillRect(x, 36, 44, 36); g.fillStyle = '#3a6ea8'; g.fillRect(0, h - 18, w, 6); });
+  STARTER_M = {
+    tin: new THREE.MeshStandardMaterial({ map: tin, roughness: 0.55, metalness: 0.65, side: THREE.DoubleSide }),
+    sign: new THREE.MeshStandardMaterial({ map: sign, roughness: 0.8 }),
+    cabin: new THREE.MeshStandardMaterial({ map: cabin, roughness: 0.7 }),
+    wood: new THREE.MeshStandardMaterial({ color: 0x7a5a38, roughness: 0.9 }),
+    tarmac: new THREE.MeshStandardMaterial({ color: 0x5a5650, roughness: 0.95 }),
+    sock: new THREE.MeshStandardMaterial({ color: 0xff6a10, roughness: 0.8, side: THREE.DoubleSide }),
+  };
+  return STARTER_M;
+}
+export function buildStarterSite() {
+  const m = mats(), s = starterMats();
+  HALOS.length = 0;
+  const root = new THREE.Group(); root.name = 'starterSite';
+  const S = new THREE.Group();
+  // launch mound: gravel apron, concrete top, ramp to the south-west
+  const mound = new THREE.Mesh(new THREE.CylinderGeometry(26, 34, PAD_HEIGHT, 8), m.gravel); mound.position.y = PAD_HEIGHT / 2 - 0.5; mound.rotation.y = Math.PI / 8; S.add(mound);
+  cyl(S, 22, 22, 0.4, m.concrete, 0, PAD_HEIGHT - 0.3, 0, 8);
+  const ramp = new THREE.Mesh(new THREE.BoxGeometry(12, PAD_HEIGHT, 70), m.gravel); ramp.position.set(-8, PAD_HEIGHT / 2 - 3.5, 58); ramp.rotation.x = -Math.atan(PAD_HEIGHT / 70); S.add(ramp);
+  box(S, 24, 3, 24, m.steelGrey, 0, PAD_HEIGHT + 1.5, 0); // launch mount (same as the big pad)
+  box(S, 8, 1.2, 30, m.dark, 0, PAD_HEIGHT - 0.2, -24); // flame trench
+  for (const [x, z] of [[-9, -9], [9, -9], [9, 9], [-9, 9]]) box(S, 1.6, 4, 1.6, m.steelGrey, x, PAD_HEIGHT + 5, z);
+  lattice(S, 2.2, 42, 10, m.steelRed, -17, PAD_HEIGHT, 0);
+  box(S, 5, 0.4, 5, m.steelGrey, -17, PAD_HEIGHT + 42, 0); box(S, 9, 1.2, 1.2, m.steelRed, -11.5, PAD_HEIGHT + 30, 0);
+  box(S, 1.2, 1.2, 1.2, m.beacon, -17, PAD_HEIGHT + 43, 0); HALOS.push([-17, PAD_HEIGHT + 43, 0, 6, 1, 0.15, 0.1]);
+  // fuel bowsers parked by the mound
+  for (const [x, z] of [[34, 18], [36, 32]]) { box(S, 3, 2.2, 3, m.white, x, 1.4, z - 6.5); const t = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 9, 16), m.tank); t.rotation.x = Math.PI / 2; t.position.set(x, 2.2, z + 1); S.add(t); box(S, 2.4, 0.6, 12, m.dark, x, 0.6, z - 1); }
+  // floodlight poles and a chain-link fence
+  for (const [x, z] of [[-40, -30], [40, -30], [-40, 40]]) { cyl(S, 0.25, 0.35, 18, m.steelGrey, x, 9, z, 6); box(S, 2.4, 0.9, 0.5, m.floodHead, x, 18, z); HALOS.push([x, 18, z, 10, 1, 0.9, 0.7]); }
+  for (let k = 0; k < 12; k++) { const a1 = k / 12 * Math.PI * 2, a2 = (k + 1) / 12 * Math.PI * 2, R = 62; if (k === 3) continue; const x1 = Math.cos(a1) * R, z1 = Math.sin(a1) * R, x2 = Math.cos(a2) * R, z2 = Math.sin(a2) * R;
+    const L = Math.hypot(x2 - x1, z2 - z1); const f = new THREE.Mesh(new THREE.BoxGeometry(0.05, 2.4, L), m.fence); f.position.set((x1 + x2) / 2, 1.2, (z1 + z2) / 2); f.rotation.y = Math.atan2(x2 - x1, z2 - z1); S.add(f); cyl(S, 0.06, 0.06, 2.6, m.steelGrey, x1, 1.3, z1, 5); }
+  // arched tin hangar (the "VAB")
+  const hx = -170, hz = 120;
+  const arch = new THREE.Mesh(new THREE.CylinderGeometry(16, 16, 44, 32, 1, true, 0, Math.PI), s.tin); arch.rotation.z = Math.PI / 2; arch.rotation.y = 0.2; arch.position.set(hx, 0, hz); S.add(arch);
+  for (const e of [-1, 1]) { const end = new THREE.Mesh(new THREE.CircleGeometry(16, 32, 0, Math.PI), s.tin); end.position.set(hx + e * 22 * Math.cos(0.2), 0, hz - e * 22 * Math.sin(0.2)); end.rotation.y = 0.2 + Math.PI / 2; S.add(end); }
+  box(S, 0.6, 11, 16, m.dark, hx + 22.3 * Math.cos(0.2), 5.5, hz - 22.3 * Math.sin(0.2), 0.2); // big doors
+  const signM = new THREE.Mesh(new THREE.PlaneGeometry(12, 3), s.sign); signM.position.set(hx + 22.6 * Math.cos(0.2), 13, hz - 22.6 * Math.sin(0.2)); signM.rotation.y = 0.2 + Math.PI / 2; S.add(signM);
+  // portakabin mission control (two stacked cabins + antenna mast), crew caravan
+  const cab = (x, z, y, ry) => { const c = box(S, 12, 3.2, 3.6, s.cabin, x, y + 1.6, z, ry); return c; };
+  cab(-115, 215, 0, 0.1); cab(-115, 215, 3.2, 0.1); box(S, 1, 0.3, 3, m.steelGrey, -121, 3.2, 215, 0.1);
+  cab(-25, 180, 0, -0.35); box(S, 4, 2.4, 4, s.wood, -14, 1.2, 176, -0.35); // R&D: a cabin and a shed
+  cyl(S, 0.12, 0.12, 14, m.steelGrey, -106, 7, 214, 5); box(S, 3, 0.1, 0.1, m.steelGrey, -106, 13.5, 214);
+  box(S, 8, 2.8, 2.6, m.white, -215, 1.9, 205, 0.5); box(S, 8.05, 0.4, 2.65, m.steelRed, -215, 2.2, 205, 0.5); box(S, 6, 0.9, 2.3, m.dark, -215, 0.45, 205, 0.5); // crew caravan
+  // second-hand tracking dish
+  { const X = -80, Z = 290, sz = 10; cyl(S, 1.2, 1.6, 7, m.white, X, 3.5, Z, 10);
+    const dish = new THREE.Mesh(new THREE.SphereGeometry(sz * 0.6, 24, 8, 0, Math.PI * 2, 0, 0.9), new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.5, side: THREE.DoubleSide }));
+    dish.scale.set(1, 0.45, 1); dish.rotation.x = Math.PI - 0.8; dish.position.set(X, 9, Z); S.add(dish); }
+  // garden-shed observatory
+  box(S, 7, 4, 7, s.wood, -270, 2, 280); const dome = new THREE.Mesh(new THREE.SphereGeometry(3.6, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat('metal', 0xd0d2d6)); dome.position.set(-270, 4, 280); S.add(dome);
+  // farm water tower, windsock, site sign, tracks
+  for (const [dx, dz] of [[-2, -2], [2, -2], [2, 2], [-2, 2]]) cyl(S, 0.2, 0.2, 14, s.wood, -60 + dx, 7, 150 + dz, 5);
+  cyl(S, 3.5, 3.5, 5, m.tank, -60, 16.5, 150, 16);
+  cyl(S, 0.08, 0.08, 9, m.steelGrey, 50, 4.5, -50, 5); { const sock = new THREE.Mesh(new THREE.ConeGeometry(0.6, 3, 12, 1, true), s.sock); sock.rotation.z = Math.PI / 2; sock.position.set(51.5, 8.6, -50); S.add(sock); }
+  box(S, 0.3, 4, 0.3, s.wood, -40, 2, 105); box(S, 0.3, 4, 0.3, s.wood, -26, 2, 105); const sg = new THREE.Mesh(new THREE.PlaneGeometry(14, 3.5), s.sign); sg.position.set(-33, 4.5, 105.2); S.add(sg);
+  for (const [x1, z1, x2, z2] of [[-8, 95, -150, 140], [-150, 140, -115, 205], [-115, 205, -215, 205], [-115, 205, -80, 285], [-215, 205, -270, 275]]) ribbon(S, x1, z1, x2, z2, 7, m.crawler, 0.12, 12);
+  lamp(S, -130, 190, 8); lamp(S, -200, 190, 8);
+  root.add(mergeByMaterial(S));
+  root.add(makeHalos(HALOS));
+  root.traverse(o => { if (o.isMesh) { o.castShadow = o.material !== m.fence; o.receiveShadow = true; } });
+  return root;
+}
+// the launch site model for a facility level (cached; 0 = starter site, 1 = full space centre)
+const SITES = {};
+export function siteModel(level) { return SITES[level] || (SITES[level] = level === 0 ? buildStarterSite() : buildSpaceCenter()); }

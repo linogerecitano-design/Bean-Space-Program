@@ -489,7 +489,7 @@ function sasInput(v, ctx) {
 export function updateSituation(v, t) {
   const B = v.body; const alt = v.r.len() - B.radius;
   if (v.clamped) v.situation = 'prelaunch';
-  else if (v.landed || v.contact) v.situation = B.name === 'Earth' && alt < 50 ? 'landed' : 'landed';
+  else if (v.landed || v.contact) v.situation = (B.name === 'Earth' || (B.style && B.style.seaLevel != null)) && B.terrainHeightAt(v.r, t) < (B.style?.seaLevel ?? 0) - 0.5 ? 'splashed' : 'landed';
   else if (B.atmo && alt < B.atmo.height) v.situation = 'flying';
   else { const o = Orbit.fromState(B.mu, v.r, v.v, t); v.situation = o.e < 1 && o.pe > B.radius + (B.atmo ? B.atmo.height : 0) ? 'orbiting' : o.e >= 1 ? 'escaping' : 'suborbital'; }
   return v.situation;

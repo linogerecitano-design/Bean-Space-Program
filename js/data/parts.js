@@ -151,6 +151,8 @@ const SRB = [
   ['srb_gem63', 'GEM-63 Strap-On', 'Northrop GEM 63', 1663, 1500, 279, 250, 5.0, 44, 1.6, 20],
   ['srb_gem40', 'GEM-40 Strap-On', 'Delta II GEM 40', 499, 440, 274, 245, 1.3, 11.7, 1.02, 11],
   ['srb_p120', 'P120C Booster', 'Ariane 6 / Vega-C P120C', 4650, 4500, 279, 250, 13, 142, 3.4, 13.5],
+  ['srb_castor4', 'Castor IV Sounding Motor', 'Thiokol Castor IVA', 478, 420, 266, 237, 1.4, 10.1, 1.02, 9.1],
+  ['srb_blackbrant', 'Black Brant Sounding Motor', 'Bristol Aerospace Black Brant V', 80, 72, 255, 230, 0.28, 0.99, 0.625, 5.3],
   ['srb_castor30', 'Castor 30 Upper Solid', 'Castor 30XL', 474, 200, 294, 150, 1.4, 24.9, 2.34, 6],
   ['srb_star48', 'Star 48 Kick Motor', 'Star 48B (PAM-D)', 68, 20, 286, 150, 0.126, 2.0, 1.24, 2.0],
   ['srb_sep', 'Separation Motor', 'Booster separation motor', 80, 70, 250, 230, 0.03, 0.03, 0.4, 0.8],

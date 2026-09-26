@@ -1,6 +1,7 @@
 // Flight scene: launch, fly, stage, orbit, land, EVA, time warp, map view, interstellar travel.
 import * as THREE from 'three';
-import { h, mount, clearUI, flash, modal } from '../ui/ui.js';
+import { h, mount, clearUI, flash, modal, toast } from '../ui/ui.js';
+import { isCareer, newFlightRecord, trackFlight, checkAchievements, checkContracts, situationOf, SITUATIONS, EXPERIMENTS, sciValue, runScience, fmtFunds, expAllowed } from '../game/career.js';
 import { V3, fmtDist, fmtSpeed, fmtTime, fmtMass, AU, LY, C_LIGHT, G0, DAY } from '../core/math.js';
 import { Orbit } from '../core/orbit.js';
 import { Vessel, physicsStep, updateSituation, vesselUp, cloneNode, newNode } from '../core/vessel.js';
@@ -8,7 +9,7 @@ import { PROPS } from '../data/parts.js';
 import { buildVesselMesh } from '../render/vesselMesh.js';
 import { OrbitCam } from '../core/camera.js';
 import { siteFrame, localToSystem, bfToSystem, attachToBody } from './site.js';
-import { buildSpaceCenter, PAD_HEIGHT } from '../render/spaceCenter.js';
+import { siteModel, PAD_HEIGHT, PAD_RADIUS } from '../render/spaceCenter.js';
 import { keys, down, hit, buildTouchControls, touch } from '../core/input.js';
 import { Navball } from '../render/navball.js';
 import { MapView } from '../render/mapView.js';
@@ -77,12 +78,14 @@ export class FlightScene {
     const v = this.vessel;
     this.buildMesh();
     this.loadOthers();
-    if (G.sys.starId === 'sol') { if (!this.center) this.center = buildSpaceCenter(); this.earth = G.sys.get('Earth'); this.site = siteFrame(this.earth); }
+    if (G.sys.starId === 'sol') { this.siteLevel = G.game.mode === 'career' ? (G.game.facility || 0) : 1; this.center = siteModel(this.siteLevel); this.earth = G.sys.get('Earth'); this.site = siteFrame(this.earth); }
     this.cam.dist = Math.max(15, v.height * 1.8); this.cam.pitch = 0.15; this.cam.yaw = 2.6; this.cam.minDist = v.type === 'eva' ? 1.5 : 3; this.cam.maxDist = 1e13;
     this.buildUI();
     this.map.clear();
     G.world.setShadowSize(Math.max(40, v.height * 1.6));
     this.flags = []; for (const f of G.game.flags) this.spawnFlag(f);
+    this.careerT = 0; this.careerDt = 0;
+    if (isCareer(G.game)) { G.game.recs ||= {}; G.game.recs[v.id] ||= newFlightRecord(); }
     if (v.situation === 'prelaunch') flash(G.mobile || document.body.classList.contains('compact') ? 'Tap STAGE to launch · slide the throttle' : 'Press SPACE (or STAGE) to launch · Shift = throttle up', 4000);
   }
   exit() {
@@ -101,14 +104,7 @@ export class FlightScene {
   }
   place(v, where) {
     const G = this.G, t = G.t; v.throttle = 0;
-    const setLanded = (body, lat, lon, extra = 0) => {
-      const d = latLonToDir(lat, lon); const hgt = body.surface ? body.surface.height(...d) : 0;
-      const hCom = v.com[1] - v.bottom + 0.3 + extra + hgt;
-      const bf = [d[0] * (body.radius + hCom), d[1] * (body.radius + hCom), d[2] * (body.radius + hCom)];
-      const up = new THREE.Vector3(...d);
-      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-      v.body = body; v.landed = true; v.landedBF = bf; v.landedQ = q.toArray(); this.syncLanded(v, t);
-    };
+    const setLanded = (body, lat, lon, extra = 0) => this.landAt(v, body, lat, lon, extra);
     if (where === 'pad') {
       const earth = G.sys.get('Earth'); const s = siteFrame(earth);
       setLanded(earth, 28.6082, -80.6041, PAD_HEIGHT + 3 - 0.3 + (s.ground - earth.surface.height(...latLonToDir(28.6082, -80.6041))));
@@ -128,6 +124,52 @@ export class FlightScene {
       }
       v.landed = false; v.situation = 'orbiting';
     }
+  }
+  // set a vessel down upright on a body's surface at lat/lon (degrees)
+  landAt(v, body, lat, lon, extra = 0) {
+    const d = latLonToDir(lat, lon); const hgt = body.surface ? body.surface.height(...d) : 0;
+    const hCom = v.com[1] - v.bottom + 0.3 + extra + Math.max(hgt, body.name === 'Earth' ? 0 : -1e9);
+    const bf = [d[0] * (body.radius + hCom), d[1] * (body.radius + hCom), d[2] * (body.radius + hCom)];
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...d));
+    v.body = body; v.landed = true; v.landedBF = bf; v.landedQ = q.toArray(); this.syncLanded(v, this.G.t);
+  }
+  // circular (equatorial-ish) orbit at altitude alt (m) around body
+  orbitAt(v, body, alt, inc = 0) {
+    const r = body.radius + alt; const pole = new THREE.Vector3(body.poleAxis.x, body.poleAxis.y, body.poleAxis.z);
+    const rv = new THREE.Vector3(1, 0, 0).applyQuaternion(body.poleQuat).applyAxisAngle(pole, Math.random() * Math.PI * 2);
+    const vv = new THREE.Vector3().crossVectors(pole, rv).normalize().applyAxisAngle(rv, inc * Math.PI / 180);
+    const sp = Math.sqrt(body.mu / r);
+    v.body = body; v.r = new V3(rv.x * r, rv.y * r, rv.z * r); v.v = new V3(vv.x * sp, vv.y * sp, vv.z * sp);
+    v.q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vv); v.w.set(0, 0, 0);
+    v.landed = false; v.clamped = false; v.contact = false; v.situation = 'orbiting';
+  }
+  // sandbox: jump anywhere in this star system, landed or in orbit
+  async teleportDialog() {
+    const G = this.G, v = this.vessel; if (!v || v.galactic) return flash('Not available in interstellar space');
+    const bodies = G.sys.bodies.filter(b => b.type !== 'star' || b === G.sys.star);
+    const depth = (b) => { let d = 0; for (let p = b.parentBody; p; p = p.parentBody) d++; return d; };
+    const sel = h('select', {}, bodies.map(b => h('option', { value: b.name, selected: b === v.body ? true : undefined }, '\u00a0'.repeat(depth(b) * 3) + b.name + (b.isGas ? ' (gas giant)' : b.isStar ? ' (star)' : ''))));
+    const mode = h('select', {}, h('option', { value: 'orbit' }, 'Circular orbit'), h('option', { value: 'land' }, 'Landed on the surface'));
+    const alt = h('input', { type: 'number', min: 1, step: 'any', placeholder: 'auto' });
+    const lat = h('input', { type: 'number', value: 0, step: 'any' }), lon = h('input', { type: 'number', value: 0, step: 'any' });
+    const landRow = h('div.col', { style: { display: 'none' } }, h('label', {}, 'Latitude / longitude (°)'), h('div.row', {}, lat, lon));
+    const altRow = h('div.col', {}, h('label', {}, 'Altitude (km) — blank picks one just above the atmosphere'), alt);
+    const sync = () => { const b = G.sys.get(sel.value); const canLand = b && b.hasSurface; if (!canLand && mode.value === 'land') mode.value = 'orbit'; mode.options[1].disabled = !canLand; landRow.style.display = mode.value === 'land' ? '' : 'none'; altRow.style.display = mode.value === 'orbit' ? '' : 'none'; };
+    sel.onchange = sync; mode.onchange = sync; sync();
+    const r = await modal('Teleport (sandbox)', h('div.col', {}, h('label', {}, 'Destination'), sel, h('label', {}, 'Where'), mode, altRow, landRow), [{ label: 'Cancel' }, { label: 'Teleport', value: 'go', primary: true }]);
+    if (r !== 'go') return;
+    const b = G.sys.get(sel.value); if (!b) return;
+    this.setWarp(0); this.debris = this.debris.filter(d => { this.root.remove(d.mesh); return false; });
+    if (this.lfx) this.lfx.clear();
+    for (const p of v.parts) { p.heatH = 0; }
+    if (mode.value === 'land' && b.hasSurface) { this.landAt(v, b, +lat.value || 0, +lon.value || 0, 0.5); v.clamped = false; v.situation = 'landed'; }
+    else {
+      const auto = b.atmo ? b.atmo.height + Math.max(20e3, b.radius * 0.02) : Math.max(15e3, b.radius * 0.15);
+      this.orbitAt(v, b, alt.value ? Math.max(1, +alt.value) * 1000 : auto);
+    }
+    if (this.mapMode) this.toggleMap();
+    this.map.clear(); this.cam.dist = Math.max(15, v.height * 1.8);
+    flash(`Teleported to ${b.name}`);
   }
   syncLanded(v, t) {
     const B = v.body; const q = B.rotAt(t);
@@ -178,7 +220,7 @@ export class FlightScene {
     const main = h('div.hud-btns', {},
       B('sas', 'SAS', () => { this.vessel.sas = !this.vessel.sas; this.vessel.sasHold = null; }), h('button.sas-toggle', { onclick: () => document.body.classList.toggle('show-sas') }, 'Modes'), B('rcs', 'RCS', () => this.vessel.rcs = !this.vessel.rcs),
       B('map', 'MAP', () => this.toggleMap()), B('cam', 'CAM', () => this.cycleCam()), B('eva', 'EVA', () => this.eva(), '.opt'), B('flag', 'Flag', () => this.plantFlag(), '.opt'),
-      B('node', 'Maneuver', () => this.nodePanel(), '.opt'), B('panels', 'Panels', () => this.togglePanels(), '.opt'), B('warpd', 'Warp drive', () => this.toggleWarpDrive(), '.opt'), B('menu', '☰', () => this.pauseMenu()),
+      B('node', 'Maneuver', () => this.nodePanel(), '.opt'), B('sci', '🔬 Science', () => this.sciencePanel()), B('panels', 'Panels', () => this.togglePanels(), '.opt'), B('warpd', 'Warp drive', () => this.toggleWarpDrive(), '.opt'), B('menu', '☰', () => this.pauseMenu()),
       B('more', '⋯', () => document.body.classList.toggle('hud-more')));
     const left = h('div.col', {}, sasModes); const right = h('div.col', {}, main);
     // on phones the telemetry collapses to the essentials; tap it for the full readout
@@ -263,10 +305,12 @@ export class FlightScene {
   async pauseMenu() {
     const G = this.G; const v = this.vessel;
     const canRecover = v.body && v.body.name === 'Earth' && (v.landed || v.situation === 'landed' || v.situation === 'splashed') && G.sys.starId === 'sol';
+    const sandbox = G.game.mode !== 'career';
     const r = await modal('Flight menu', `<div class="dim">${v.name} — ${v.situation} at ${v.body ? v.body.name : 'interstellar space'}</div>`,
-      [{ label: 'Resume' }, { label: 'Save', value: 'save' }, canRecover ? { label: 'Recover vessel', value: 'recover', primary: true } : null, this.launchParams ? { label: 'Revert to launch', value: 'revert' } : null,
+      [{ label: 'Resume' }, { label: 'Save', value: 'save' }, sandbox && !v.galactic ? { label: '✦ Teleport', value: 'tp' } : null, canRecover ? { label: 'Recover vessel', value: 'recover', primary: true } : null, this.launchParams ? { label: 'Revert to launch', value: 'revert' } : null,
         this.launchParams ? { label: 'Revert to VAB', value: 'vab' } : null, { label: 'Graphics', value: 'gfx' }, { label: 'Tracking Station', value: 'track' }, { label: 'Space Centre', value: 'center' }].filter(Boolean));
     if (r === 'save') G.save();
+    if (r === 'tp') this.teleportDialog();
     if (r === 'gfx') graphicsDialog();
     if (r === 'recover') this.recover();
     if (r === 'revert') { this.removeVessel(); G.go('flight', this.launchParams); }
@@ -275,16 +319,23 @@ export class FlightScene {
     if (r === 'center') G.go('center');
   }
   removeVessel() {
-    const G = this.G; const v = this.vessel;
+    const G = this.G; const v = this.vessel; if (G.game.recs) delete G.game.recs[v.id];
     G.game.vessels = G.game.vessels.filter(x => x.id !== v.id);
     for (const n of v.crew) { const a = G.game.roster.find(r => r.name === n); if (a) a.status = 'available'; }
     this.vessel = null;
   }
   recover() {
-    const G = this.G; const v = this.vessel;
-    for (const n of v.crew) { const a = G.game.roster.find(r => r.name === n); if (a) { a.status = 'available'; a.missions++; a.xp += 1; } }
-    G.game.vessels = G.game.vessels.filter(x => x.id !== v.id);
-    this.vessel = null; flash('Vessel recovered'); G.go('center');
+    const G = this.G; const v = this.vessel; const g = G.game;
+    let msg = null;
+    if (isCareer(g)) { // parts come back for a refund; recovery contracts complete here
+      const refund = Math.round(v.livingParts().reduce((c, p) => c + (p.part.cost || 0), 0) * 0.8);
+      g.funds += refund; this.careerTick(0, { recovered: true, crewed: v.crew.length > 0 });
+      msg = `Recovered ${v.name}: +${fmtFunds(refund)} refund (80% of the parts that came back)`;
+      delete g.recs?.[v.id];
+    }
+    for (const n of v.crew) { const a = g.roster.find(r => r.name === n); if (a) { a.status = 'available'; a.missions++; a.xp += 1; } }
+    g.vessels = g.vessels.filter(x => x.id !== v.id);
+    this.vessel = null; flash(msg || 'Vessel recovered', msg ? 5000 : 2500); G.go('center');
   }
   // ------------------------------------------------------------------ EVA / flags
   // Crew seating: fill each crew part in vessel order
@@ -414,6 +465,7 @@ export class FlightScene {
     }
     if (part.decoupler && active && p.attached) body.append(h('button.danger', { onclick: () => { const oldCom = v.com.slice(); const lost = v.separateAt(p); this.spawnDebris(lost, oldCom); this.applyDetach(); el.remove(); flash('Decoupled'); } }, 'Decouple'));
     if (part.chute && active) body.append(h('button', { onclick: () => { p.deployed = true; refresh(); flash('Parachute armed'); } }, p.deployed ? 'Parachute armed' : 'Deploy parachute'));
+    if (part.science && active && isCareer(this.G.game) && v.body) { const e = this.experiments().find(x => x.kind === part.science); if (e) body.append(h('button' + (e.tp ? '.primary' : ''), { onclick: () => { this.runExp(e); refresh(); } }, e.tp ? `Run ${e.name} (+${e.tp} TP)` : `${e.name}: ${e.ok ? 'done here' : 'n/a here'}`)); }
     if (part.mesh?.deploy && active) body.append(h('button', { onclick: () => { p.deployed = !p.deployed; refresh(); } }, p.deployed ? 'Retract solar array' : 'Deploy solar array'));
     if (part.crew) {
       const seat = this.seats(v).find(s => s.part === p);
@@ -497,6 +549,40 @@ export class FlightScene {
     this.stepDebris(dt * warp);
     this.render(dt, WARPS[this.warpI] <= WARPS[PHYS_MAX] ? warp : 0);
     if ((this.hudT += dt) > 0.1) { this.hudT = 0; this.updateHUD(); }
+    this.careerDt += simDt; if ((this.careerT += dt) > 0.25) { this.careerT = 0; this.careerTick(this.careerDt); this.careerDt = 0; }
+  }
+  // ------------------------------------------------------------------ career
+  rec(v = this.vessel) { const g = this.G.game; if (!isCareer(g) || !v) return null; g.recs ||= {}; return (g.recs[v.id] ||= newFlightRecord()); }
+  careerTick(dt, event) {
+    const G = this.G, g = G.game, v = this.vessel; const rec = this.rec(); if (!rec) return;
+    if (!event) trackFlight(rec, v, dt);
+    for (const a of checkAchievements(g, rec)) toast(a.name, `${a.desc} · +${a.tp} TP`, 'ach', 5500);
+    for (const c of checkContracts(g, rec, v, event)) toast('Contract complete: ' + c.title, `+${fmtFunds(c.pay)} · +${c.tp} TP`, 'contract', 6000);
+  }
+  // experiments this vessel can run right now: [{kind, name, tp, part}]
+  experiments(v = this.vessel) {
+    const g = this.G.game; if (!isCareer(g) || !v || v.galactic || !v.body) return [];
+    const sit = situationOf(v); const out = []; const seen = new Set();
+    const add = (kind, part) => { if (seen.has(kind) || !EXPERIMENTS[kind]) return; seen.add(kind); out.push({ kind, part, name: EXPERIMENTS[kind].name, tp: sciValue(g, kind, v.body, sit), ok: expAllowed(kind, sit, v.body), sit }); };
+    if (v.type === 'eva') add('eva', null);
+    else { for (const p of v.livingParts()) if (p.part.science) add(p.part.science, p); if (v.crew.length) add('crew', null); }
+    return out;
+  }
+  runExp(e) {
+    const G = this.G, g = G.game, v = this.vessel;
+    const tp = runScience(g, e.kind, v.body, e.sit);
+    if (!tp) return flash(e.ok ? `Already studied ${e.name.toLowerCase()} ${SITUATIONS[e.sit].toLowerCase()} ${v.body.name}` : `${e.name} doesn't work here`);
+    toast(e.name, `${SITUATIONS[e.sit]} ${v.body.name} · +${tp} TP`, 'sci');
+    this.careerTick(0, { science: { kind: e.kind, body: v.body.name, sit: e.sit } });
+  }
+  sciencePanel() {
+    const v = this.vessel; document.querySelector('.part-menu')?.remove();
+    const { el, body } = this.menuShell('🔬 Science · ' + SITUATIONS[situationOf(v)] + ' ' + v.body.name, innerWidth / 2 - 150, 90);
+    const list = this.experiments();
+    if (!list.length) body.append(h('div.small.dim', {}, 'No experiments aboard. Add science parts in the VAB, or bring a Bean for crew reports.'));
+    for (const e of list) body.append(h('div.sci-row', {}, h('span', {}, e.name), e.tp ? h('span.tp', {}, '+' + e.tp + ' TP') : h('span.small.dim', {}, e.ok ? 'done here' : 'n/a here'),
+      h('button' + (e.tp ? '.primary' : ''), { disabled: e.tp ? undefined : true, onclick: () => { this.runExp(e); el.remove(); this.sciencePanel(); } }, 'Run')));
+    body.append(h('div.small.dim', { style: { marginTop: '6px' } }, 'Each experiment pays once per situation (landed, flying low/high, in space near/high) per world. Rarer places pay far more.'));
   }
   handleInput(dt) {
     const v = this.vessel, G = this.G;
@@ -871,7 +957,7 @@ export class FlightScene {
     if (G.sys.starId === 'sol' && v.body.name === 'Earth') {
       const s = this.site; const q = v.body.rotAt(G.t).invert(); const p = new THREE.Vector3(v.r.x, v.r.y, v.r.z).applyQuaternion(q);
       const dpad = Math.hypot(p.x - s.bf[0], p.y - s.bf[1], p.z - s.bf[2]);
-      v.padHeight = dpad < 25 ? PAD_HEIGHT + 3 + (s.ground - (v.body.terrainHeightAt(v.r, G.t))) : dpad < 100 ? PAD_HEIGHT : 0;
+      v.padHeight = dpad < 25 ? PAD_HEIGHT + 3 + (s.ground - (v.body.terrainHeightAt(v.r, G.t))) : dpad < PAD_RADIUS[this.siteLevel ?? 1] ? PAD_HEIGHT : 0;
     } else v.padHeight = 0;
     // map
     if (this.mapMode) { this.updatePlan(); this.map.update(G.sys, G.t, camPos, this.mapFocus || v.body, v, this.plan); }
@@ -920,6 +1006,7 @@ export class FlightScene {
     this.btns.eva.textContent = v.type === 'eva' ? 'Board' : 'EVA';
     this.btns.warpd.classList.toggle('on', v.warp.on); this.btns.warpd.style.display = v.livingParts().some(p => p.part.warp) ? '' : 'none';
     this.btns.flag.style.display = v.type === 'eva' ? '' : 'none';
+    if (this.btns.sci) { const ex = this.experiments(); this.btns.sci.style.display = ex.length ? '' : 'none'; this.btns.sci.classList.toggle('on', ex.some(e => e.tp > 0)); }
     this.btns.panels.style.display = v.livingParts().some(p => p.part.mesh?.deploy) ? '' : 'none'; this.btns.panels.classList.toggle('on', v.livingParts().some(p => p.part.mesh?.deploy && p.deployed));
     if (v.galactic) {
       const g = v.galactic; const sp = Math.hypot(...g.vel);

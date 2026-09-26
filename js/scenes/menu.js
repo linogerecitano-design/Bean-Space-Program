@@ -15,7 +15,8 @@ export class MenuScene {
       h('div.title', {}, 'BEAN ', h('span', {}, 'SPACE'), h('br'), 'PROGRAM'),
       h('div.dim.small', {}, `Real Solar System · ${PART_COUNT} parts · the whole galaxy`),
       has ? h('button.big.primary', { onclick: () => this.start() }, 'Continue') : null,
-      h('button.big' + (has ? '' : '.primary'), { onclick: async () => { if (has && await modal('New game', 'Start a new sandbox game? Your current save will be replaced (export it first if you want to keep it).', [{ label: 'Cancel', value: false }, { label: 'Start new', value: true, danger: true }]) !== true) return; G.game = newGame('sandbox'); saveLocal(G.game); this.start(); } }, 'New Sandbox Game'),
+      h('button.big' + (has ? '' : '.primary'), { onclick: () => this.newGame('career') }, 'New Career'),
+      h('button.big', { onclick: () => this.newGame('sandbox') }, 'New Sandbox Game'),
       h('button', { onclick: () => this.saves() }, 'Saves & Sync (desktop ⇄ mobile)'),
       h('button', { onclick: () => G.go('galaxy', { from: 'menu' }) }, 'Explore the Galaxy'),
       h('button', { onclick: () => graphicsDialog() }, 'Graphics'),
@@ -25,6 +26,12 @@ export class MenuScene {
     G.t = G.game ? G.game.t : G.t;
   }
   async start() { await this.G.go('center'); }
+  async newGame(mode) {
+    const G = this.G;
+    const what = mode === 'career' ? 'Career: start at a small launch site with little money and a few parts. Earn money from contracts and Tech Points from science and achievements to research the tech tree — and eventually buy the full Bean Space Centre.' : 'Sandbox: every part unlocked, unlimited money, teleport anywhere.';
+    if (G.game && !await modal(mode === 'career' ? 'New career' : 'New sandbox game', what + '<br><br>Your current save will be replaced (export it first from Saves & Sync if you want to keep it).', [{ label: 'Cancel', value: false }, { label: 'Start', value: true, primary: true }])) return;
+    G.game = newGame(mode); G.t = G.game.t; G.save(true); await G.go('center');
+  }
   async saves() {
     const G = this.G;
     const ta = h('textarea', { placeholder: 'Paste a save code here to import…' });

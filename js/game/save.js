@@ -3,6 +3,7 @@
 // Save codes (compressed text) and .bsp files work everywhere as a manual fallback.
 import { START_T } from '../core/universe.js';
 import { newNode } from '../core/vessel.js';
+import { initCareer } from './career.js';
 
 const KEY = 'bsp.save.v1';
 const FIRST = ['Bean', 'Jebedean', 'Valentean', 'Bobean', 'Billbean', 'Neil', 'Sally', 'Yuri', 'Valentina', 'Buzz', 'Mae', 'Chris', 'Peggy', 'Gene', 'Kalpana', 'Tim'];
@@ -48,7 +49,23 @@ function makeRoster() {
   return r;
 }
 
+// career starts with starter-tech rockets only
+export function careerDesigns() {
+  const d = (name, root) => ({ name, root, builtin: true });
+  const hop = newNode('pod_mercury'); hop.radial.push({ sym: 1, at: 0.1, node: newNode('chute_main') });
+  let c = hop; const add = (id) => { c.below = newNode(id); c = c.below; return c; };
+  add('heat_1.25'); add('dec_1.25'); add('srb_castor4'); c.radial.push({ sym: 4, at: 0.9, node: newNode('fin_delta') });
+  const snd = newNode('probe_sputnik'); c = snd; add('srb_blackbrant');
+  c.radial.push({ sym: 1, at: 0.12, node: newNode('sci_thermo') }); c.radial.push({ sym: 1, at: 0.12, angle: Math.PI, node: newNode('sci_baro') });
+  c.radial.push({ sym: 3, at: 0.92, node: newNode('fin_delta') });
+  return [d('Castor Hopper', hop), d('Sounding Probe', snd)];
+}
 export function newGame(mode = 'sandbox') {
+  const g = newGameBase(mode);
+  if (mode === 'career') { initCareer(g); g.designs = careerDesigns(); g.selectedDesign = 0; }
+  return g;
+}
+function newGameBase(mode) {
   return {
     version: 1, mode, created: Date.now(), updated: Date.now(),
     t: START_T, funds: mode === 'career' ? 250000 : Infinity, science: 0,

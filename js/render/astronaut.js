@@ -155,7 +155,7 @@ export class Astronaut {
   update(dt) {
     this.t += dt; const t = this.t; const B = this.bones;
     for (const n of BONES) B[n].rotation.set(0, 0, 0);
-    B.hips.position.set(...J.hips);
+    B.hips.position.set(...J.hips); B.chest.position.set(0, J.chest[1] - J.spine[1], 0); this.hatLift = 0;
     // the source mesh is modelled in a T-pose: bring the arms down to the sides
     const relax = 0.82;
     this.set('shL', 0, 0, -relax); this.set('shR', 0, 0, relax);
@@ -206,8 +206,134 @@ export class Astronaut {
       B.elL.rotation.x = -0.8; B.elR.rotation.x = -0.8; B.neck.rotation.y = Math.sin(t * 0.5) * 0.3;
     } else if (s === 'plant') { // planting a flag
       B.shR.rotation.set(-1.2, 0, 0.4); B.elR.rotation.x = -0.5; B.shL.rotation.set(-1.1, 0, -0.4); B.elL.rotation.x = -0.6; B.spine.rotation.x = 0.3; B.neck.rotation.x = 0.2;
+    } else this.gesture(s, t, B, relax, seed);
+    if (this.hat) { // hats follow the tip-hat gesture
+      const h = this.hat; h.position.copy(h.userData.rest); h.rotation.set(0, 0, 0);
+      if (this.hatLift) { h.position.y += this.hatLift * 0.14; h.position.x -= this.hatLift * 0.08; h.rotation.z = this.hatLift * 0.35; h.rotation.x = -this.hatLift * 0.2; }
     }
   }
+  // character gestures used by the contract givers in Mission Control
+  gesture(s, t, B, relax, seed) {
+    const breathe = () => { const br = Math.sin(t * 1.6) * 0.025; B.chest.rotation.x = br; B.hips.position.y = J.hips[1] + br * 0.2; };
+    const pulse = (period, on) => { const ph = ((t + seed) % period) / period; return ph < on ? Math.sin(ph / on * Math.PI) : 0; }; // 0..1..0 once per period
+    this.hatLift = 0;
+    breathe();
+    if (s === 'tiphat') { // a gentlemanly tip of the top hat every few seconds
+      const k = pulse(5, 0.45); const kk = Math.min(1, k * 1.6);
+      B.shR.rotation.set(-0.4 * kk, 0, relax - 2.5 * kk); B.elR.rotation.set(0, 0, -1.3 * kk); B.neck.rotation.x = 0.18 * k; B.neck.rotation.y = -0.1 * k;
+      B.chest.rotation.x += 0.12 * k; this.hatLift = Math.max(0, (k - 0.55) / 0.45);
+      B.shL.rotation.set(0.1, 0, -relax + 0.25); B.elL.rotation.set(-0.4, 0, 0.6); // hand on hip
+    } else if (s === 'think') { // hand on chin, head tilted, the other arm folded, occasional "aha!"
+      const aha = pulse(7, 0.18);
+      B.shR.rotation.set(-1.0 - 0.3 * aha, 0.2, relax * 0.6 - 1.4 * aha); B.elR.rotation.set(0, 0.2, -1.9 + 1.2 * aha);
+      B.shL.rotation.set(-0.7, 0, -relax * 0.7); B.elL.rotation.set(0, -1.3, 0);
+      B.neck.rotation.z = 0.18 * (1 - aha) + Math.sin(t * 0.7 + seed) * 0.04; B.neck.rotation.x = 0.1 - 0.25 * aha; B.neck.rotation.y = Math.sin(t * 0.3 + seed) * 0.15;
+    } else if (s === 'salute') { // snaps a salute every few seconds, otherwise stands to attention
+      const k = Math.min(1, pulse(5, 0.5) * 2.2);
+      B.shR.rotation.set(-0.35 * k, -0.55 * k, relax - 1.05 * k); B.elR.rotation.set(0, 0, -2.25 * k);
+      B.shL.rotation.z = -relax - 0.02; B.hipL.rotation.z = 0; B.hipR.rotation.z = 0; B.neck.rotation.x = -0.05; B.chest.rotation.x -= 0.05;
+    } else if (s === 'point') { // points up at the sky, then back at you
+      const k = Math.min(1, pulse(6, 0.4) * 1.8);
+      B.shR.rotation.set(-0.6 * k, 0, relax - 2.7 * k); B.elR.rotation.set(0, 0, -0.1);
+      B.neck.rotation.x = -0.35 * k; B.neck.rotation.y = -0.2 * k;
+      B.shL.rotation.set(-0.3, 0, -relax + 0.2); B.elL.rotation.set(-0.8, 0, 0);
+    } else if (s === 'talk') { // animated chatter with both hands
+      const a = Math.sin(t * 3.1 + seed), b = Math.sin(t * 2.3 + seed * 2);
+      B.shR.rotation.set(-0.7 + 0.2 * a, 0, relax - 0.3 + 0.15 * b); B.elR.rotation.set(-0.6 + 0.3 * b, 0, -0.2);
+      B.shL.rotation.set(-0.7 + 0.2 * b, 0, -relax + 0.3 - 0.15 * a); B.elL.rotation.set(-0.6 + 0.3 * a, 0, 0.2);
+      B.neck.rotation.x = 0.05 + Math.abs(Math.sin(t * 5.2)) * 0.06; B.neck.rotation.y = Math.sin(t * 0.9 + seed) * 0.25; B.chest.rotation.y = a * 0.05;
+    } else if (s === 'cheer') { // both arms up, bouncing
+      const b = Math.abs(Math.sin(t * 6)); B.hips.position.y = J.hips[1] + b * 0.06;
+      B.shR.rotation.set(0, 0, relax - 2.9 + 0.2 * b); B.shL.rotation.set(0, 0, -relax + 2.9 - 0.2 * b); B.elR.rotation.z = -0.3 * b; B.elL.rotation.z = 0.3 * b;
+      B.neck.rotation.x = -0.2; B.knL.rotation.x = 0.3 * (1 - b); B.knR.rotation.x = 0.3 * (1 - b); B.hipL.rotation.x = -0.15 * (1 - b); B.hipR.rotation.x = -0.15 * (1 - b);
+    } else if (s === 'shrug') {
+      const k = Math.min(1, pulse(2.2, 0.6) * 1.6);
+      B.shR.rotation.set(-0.3 * k, 0, relax - 0.5 * k); B.shL.rotation.set(-0.3 * k, 0, -relax + 0.5 * k); B.elR.rotation.set(-1.2 * k, 0, 0); B.elL.rotation.set(-1.2 * k, 0, 0);
+      B.chest.position.y = J.chest[1] - J.spine[1] + 0.02 * k; B.neck.rotation.z = 0.15 * k;
+    } else { // unknown: fall back to a relaxed stand
+      B.neck.rotation.y = Math.sin(t * 0.3 + seed) * 0.3;
+    }
+  }
+  // Everyday clothes for the non-astronaut Beans (contract givers): recoloured body + hats & props
+  dress(outfit) {
+    const O = OUTFITS[outfit]; if (!O) return this;
+    // keep the suit mesh (it parents the skeleton, and the props hang off its bones) but draw nothing
+    this.setSuit(false); this.suit.visible = true; this.suit.material.visible = false; this.suit.castShadow = false;
+    this.body.geometry = outfitGeometry(outfit);
+    this.body.material = base.suitMat.clone(); this.body.material.color.set(0xffffff);
+    const M = (c, r = 0.7, m = 0) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: m });
+    const N = this.bones.neck, C = this.bones.chest; const add = (bone, mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; bone.add(mesh); return mesh; };
+    const hat = new THREE.Group(); let hasHat = true;
+    const cyl = (r1, r2, h, c, y, seg = 32) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, seg), c); m.position.y = y; m.castShadow = true; hat.add(m); return m; };
+    const HY = 0.86; // crown of the head, neck-bone frame
+    switch (O.hat) {
+      case 'tophat': { const k = M(0x121214, 0.5); cyl(0.46, 0.46, 0.03, k, 0); cyl(0.27, 0.29, 0.5, k, 0.26); cyl(0.295, 0.295, 0.08, M(0x7a1020), 0.06); break; }
+      case 'cap': { const o = M(0x4b5320, 0.8); cyl(0.36, 0.34, 0.16, o, 0.06); cyl(0.46, 0.4, 0.08, o, 0.17); const v = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.025, 24, 1, false, -Math.PI / 2, Math.PI), M(0x0c0c0c, 0.3)); v.position.set(0, 0.0, 0.18); v.rotation.x = 0.25; hat.add(v); const b = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), M(0xd4a017, 0.3, 0.8)); b.position.set(0, 0.13, 0.36); hat.add(b); break; }
+      case 'straw': { const st = M(0xd8b86a, 0.95); cyl(0.72, 0.72, 0.025, st, 0); cyl(0.33, 0.37, 0.22, st, 0.11); cyl(0.375, 0.375, 0.06, M(0x8a2a1a), 0.04); break; }
+      case 'toque': { const w = M(0xfafafa, 0.9); cyl(0.36, 0.34, 0.34, w, 0.14); const p = new THREE.Mesh(new THREE.SphereGeometry(0.44, 24, 16), w); p.scale.set(1, 0.55, 1); p.position.y = 0.36; hat.add(p); break; }
+      case 'mortar': { const k = M(0x16161a, 0.6); cyl(0.36, 0.34, 0.14, k, 0.05); const bd = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.03, 0.85), k); bd.position.y = 0.13; bd.rotation.y = Math.PI / 4; hat.add(bd);
+        const ts = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.03, 0.3, 6), M(0xd4a017, 0.5, 0.4)); ts.position.set(0.42, -0.02, 0.1); hat.add(ts); break; }
+      case 'bun': { const hr = M(0x5a3a22, 0.9); const b = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), hr); b.position.set(0, 0.04, -0.2); hat.add(b); break; }
+      default: hasHat = false;
+    }
+    if (hasHat) { hat.position.set(0, HY, O.hatZ ?? -0.03); hat.userData.rest = hat.position.clone(); N.add(hat); this.hat = hat; }
+    const FZ = 0.395, EY = 0.6; // face front and eye height (neck frame)
+    if (O.glasses) { const g = M(O.glasses, 0.3, 0.6); for (const sx of [-1, 1]) { const r = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.014, 8, 24), g); r.position.set(sx * 0.14, EY, FZ); N.add(r); } const br = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.018, 0.018), g); br.position.set(0, EY + 0.02, FZ + 0.01); N.add(br); }
+    if (O.monocle) { const r = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.012, 8, 24), M(0xd4a017, 0.3, 0.9)); r.position.set(-0.14, EY, FZ + 0.01); N.add(r); const ch = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.45, 4), M(0xd4a017, 0.3, 0.9)); ch.position.set(-0.2, EY - 0.24, FZ - 0.02); ch.rotation.z = 0.25; N.add(ch); }
+    if (O.tache) { const tm = M(O.tache, 0.9); const tg = new THREE.Group(); for (const sx of [-1, 1]) { const m = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), tm); m.scale.set(1.25, 0.4, 0.5); m.position.set(sx * 0.1, 0, 0); m.rotation.z = sx * (O.tacheCurl ? -0.35 : -0.15); tg.add(m); } tg.position.set(0, 0.3, 0.45); N.add(tg); }
+    if (O.bowtie) { const bt = M(O.bowtie, 0.6); for (const sx of [-1, 1]) { const w = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.07, 4), bt); w.rotation.z = sx * Math.PI / 2; w.position.set(sx * 0.035, 0, 0); add(C, w, sx * 0.035, 0.07, 0.075); } add(C, new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), bt), 0, 0.07, 0.085); }
+    if (O.scarf) { const sc = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.035, 8, 20), M(O.scarf, 0.9)); sc.rotation.x = Math.PI / 2; add(C, sc, 0, 0.1, 0.0); const k = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 4), M(O.scarf, 0.9)); k.rotation.x = Math.PI; add(C, k, 0.02, 0.03, 0.085); }
+    if (O.medals) O.medals.forEach((c, i) => { add(C, new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.01), M(c, 0.5)), 0.05 + i * 0.035, 0.01, 0.07); add(C, new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.008, 10).rotateX(Math.PI / 2), M(0xd4a017, 0.3, 0.9)), 0.05 + i * 0.035, -0.02, 0.072); });
+    if (O.epaulettes) for (const sx of [-1, 1]) add(C, new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.07), M(0xd4a017, 0.4, 0.7)), sx * 0.15, 0.04, -0.01);
+    if (O.clipboard) { const cb = new THREE.Group(); const bd = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.012), M(0x8a6a3a, 0.8)); cb.add(bd); const pp = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.17, 0.004), M(0xf4f4ee, 0.9)); pp.position.z = 0.008; cb.add(pp); cb.position.set(0.18, -0.22, 0.05); cb.rotation.set(0.2, 0, 0.3); this.bones.elL.add(cb); }
+    if (O.buttons) for (let i = 0; i < 4; i++) for (const sx of [-1, 1]) add(C, new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), M(O.buttons, 0.4)), sx * 0.05, 0.02 - i * 0.065, 0.068);
+    this.outfit = outfit;
+    return this;
+  }
+}
+
+// ---------------------------------------------------------------- outfits
+// region colours for everyday clothes (y: feet 0 .. neck 0.8; body faces +Z)
+const rgb = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; }; // sRGB hex -> linear vertex colour
+const OUTFITS = {
+  tycoon: { jacket: 0x17171c, shirt: 0xf4f4f0, legs: 0x3a3a40, stripe: 0x6a6a70, shoes: 0x0a0a0a, gloves: 0xf4f4f0, hat: 'tophat', monocle: true, bowtie: 0xa01020, tache: 0xb8b8b8, tacheCurl: true },
+  scientist: { jacket: 0xf2f4f6, coat: true, shirt: 0x7ab0e0, legs: 0x34445a, shoes: 0x3a2a20, gloves: 0x8ec8f0, glasses: 0x202020, hat: 'bun', clipboard: true },
+  general: { jacket: 0x4b5320, shirt: 0x4b5320, legs: 0x3f461c, stripe: 0x9a2020, shoes: 0x0e0e0e, gloves: 0xf0f0ea, belt: 0x5a3a18, hat: 'cap', medals: [0xc02020, 0x2050c0, 0xe0c020], epaulettes: true, tache: 0x3a2a1a },
+  farmer: { jacket: 0xb02a22, check: 0x6a1410, overalls: 0x3a5a9a, legs: 0x3a5a9a, shoes: 0x5a3a1a, gloves: 0x9a7040, hat: 'straw' },
+  professor: { jacket: 0x7a5a3a, tweed: true, patches: 0x4a3420, shirt: 0xf0ece0, legs: 0x3e4a38, shoes: 0x3a2412, gloves: 0xc8a070, glasses: 0x8a6a2a, hat: 'mortar', bowtie: 0x2a5a2a, tache: 0xe8e8e0 },
+  chef: { jacket: 0xfbfbf8, shirt: 0xfbfbf8, legs: 0x202020, check: 0xe8e8e8, shoes: 0x1a1a1a, gloves: 0xfbfbf8, hat: 'toque', scarf: 0xc0202a, buttons: 0x202020, tache: 0x1a1210, tacheCurl: true },
+};
+export const OUTFIT_NAMES = Object.keys(OUTFITS);
+const outfitCache = {};
+function outfitGeometry(name) {
+  if (outfitCache[name]) return outfitCache[name];
+  const O = OUTFITS[name]; const g = base.body.clone(); const P = g.attributes.position, Nn = g.attributes.normal;
+  const C = new Float32Array(P.count * 3);
+  const hash = (a, b) => { const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return x - Math.floor(x); };
+  for (let i = 0; i < P.count; i++) {
+    const x = P.getX(i), y = P.getY(i), z = P.getZ(i), ax = Math.abs(x);
+    const hand = ax > 0.4 && y < 0.45, foot = y < 0.07, leg = y < 0.33, arm = ax > 0.17 && y > 0.2 && !leg;
+    let c = rgb(O.jacket);
+    if (leg) { c = rgb(O.coat && y > 0.17 ? O.jacket : O.legs); if (O.stripe && !O.coat && (Math.abs(ax - 0.12) < 0.008)) c = rgb(O.stripe);
+      if (O.check && !O.overalls && ((Math.floor(x * 28) + Math.floor(y * 28)) & 1)) c = rgb(O.check); }
+    else if (!arm) { // torso
+      if (O.shirt !== undefined && z > 0.02 && ax < (O.coat ? 0.06 : 0.045) && y > 0.5) c = rgb(O.shirt);
+      if (O.overalls && (y < 0.62 || (ax > 0.05 && ax < 0.09))) c = rgb(O.overalls);
+      else if (O.check && O.overalls && ((Math.floor(x * 30) + Math.floor(y * 30)) & 1)) c = rgb(O.check);
+      if (O.belt && y > 0.33 && y < 0.37) c = rgb(O.belt);
+    } else { // sleeves
+      if (O.check && O.overalls && ((Math.floor(x * 30) + Math.floor(y * 30)) & 1)) c = rgb(O.check);
+      if (O.patches && ax > 0.3 && ax < 0.38 && y > 0.44 && y < 0.54 && z < 0) c = rgb(O.patches);
+      if (O.stripe && name === 'general' && ax > 0.4 && ax < 0.43) c = rgb(0xd4a017); // cuff braid
+    }
+    if (O.tweed) { const n = hash(Math.floor(x * 90), Math.floor(y * 90)) * 0.16 - 0.08; c = c.map(v => Math.max(0, v + n)); }
+    if (hand) c = rgb(O.gloves); if (foot) c = rgb(O.shoes);
+    C[i * 3] = c[0]; C[i * 3 + 1] = c[1]; C[i * 3 + 2] = c[2];
+    // a hair's breadth outward so the coloured clothes cover the neck seam of the head mesh
+    const k = 0.006; P.setXYZ(i, x + Nn.getX(i) * k, y + Nn.getY(i) * k, z + Nn.getZ(i) * k);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(C, 3));
+  return (outfitCache[name] = g);
 }
 
 // Planted flag with BSP banner

@@ -12,6 +12,8 @@ import { buildVesselMesh, highlight } from '../render/vesselMesh.js';
 import { partIcon } from '../render/partIcons.js';
 import { OrbitCam } from '../core/camera.js';
 import { fmtMass } from '../core/math.js';
+import { vabHall, HALL_LIMITS } from '../render/vabHall.js';
+import { isCareer, partUnlocked, nodeOfPart, TECH_BY_ID, launchCheck, facility, fmtFunds } from '../game/career.js';
 
 const SYMS = [1, 2, 3, 4, 6, 8];
 const SNAP_PX = 46;
@@ -48,26 +50,7 @@ export class VABScene {
     const pm = new THREE.PMREMGenerator(this.G.world.renderer);
     s.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
     s.background = new THREE.Color(0x0b0e13);
-    const tl = new THREE.TextureLoader();
-    const tex = (n, rep, nor) => { const t = tl.load(`assets/ground/${n}_${nor ? 'nor' : 'diff'}.webp`); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); t.anisotropy = 8; if (!nor) t.colorSpace = THREE.SRGBColorSpace; return t; };
-    // floor: polished concrete with a painted work-area grid
-    const grid = document.createElement('canvas'); grid.width = grid.height = 512; const g = grid.getContext('2d');
-    g.clearRect(0, 0, 512, 512); g.strokeStyle = 'rgba(240,200,60,0.55)'; g.lineWidth = 3; g.strokeRect(1.5, 1.5, 509, 509);
-    const gt = new THREE.CanvasTexture(grid); gt.wrapS = gt.wrapT = THREE.RepeatWrapping; gt.repeat.set(16, 16); gt.colorSpace = THREE.SRGBColorSpace;
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(320, 320), new THREE.MeshStandardMaterial({ map: tex('concrete_floor_02', 22), normalMap: tex('concrete_floor_02', 14, true), roughness: 0.35, metalness: 0.0, color: 0x8f8f8c, envMapIntensity: 0.9 }));
-    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; s.add(floor);
-    const lines = new THREE.Mesh(new THREE.PlaneGeometry(320, 320), new THREE.MeshBasicMaterial({ map: gt, transparent: true, depthWrite: false }));
-    lines.rotation.x = -Math.PI / 2; lines.position.y = 0.02; s.add(lines);
-    // walls: ribbed panels (room box sits below the floor so the two never z-fight)
-    const wc = document.createElement('canvas'); wc.width = 256; wc.height = 256; const w = wc.getContext('2d');
-    w.fillStyle = '#4a515b'; w.fillRect(0, 0, 256, 256); for (let x = 0; x < 256; x += 16) { w.fillStyle = 'rgba(0,0,0,0.18)'; w.fillRect(x, 0, 3, 256); w.fillStyle = 'rgba(255,255,255,0.05)'; w.fillRect(x + 3, 0, 2, 256); }
-    const wt = new THREE.CanvasTexture(wc); wt.wrapS = wt.wrapT = THREE.RepeatWrapping; wt.repeat.set(20, 12); wt.colorSpace = THREE.SRGBColorSpace;
-    const room = new THREE.Mesh(new THREE.BoxGeometry(320, 242, 320), new THREE.MeshStandardMaterial({ map: wt, roughness: 0.85, metalness: 0.2, side: THREE.BackSide }));
-    room.position.y = 120; s.add(room);
-    const steel = new THREE.MeshStandardMaterial({ color: 0x7c828a, metalness: 0.7, roughness: 0.4 });
-    const rail = new THREE.MeshStandardMaterial({ color: 0xd8b030, metalness: 0.3, roughness: 0.5 });
-    for (let y = 14; y < 230; y += 20) for (const x of [-153, 153]) { const b = new THREE.Mesh(new THREE.BoxGeometry(14, 0.8, 200), steel); b.position.set(x, y, 0); b.castShadow = true; b.receiveShadow = true; s.add(b); const r = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.1, 200), rail); r.position.set(x - Math.sign(x) * 7, y + 0.9, 0); s.add(r); }
-    for (let i = 0; i < 6; i++) { const l = new THREE.Mesh(new THREE.BoxGeometry(6, 0.3, 2), new THREE.MeshStandardMaterial({ emissive: 0xfff4e0, emissiveIntensity: 4, color: 0 })); l.position.set(-60 + i * 24, 238, 0); s.add(l); }
+    this.halls = {}; this.hallLevel = -1;
     s.add(new THREE.HemisphereLight(0xdfe8ff, 0x303030, 0.9));
     const key = new THREE.DirectionalLight(0xfff6ea, 2.6); key.position.set(40, 120, 60); key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -70, right: 70, top: 160, bottom: -10, near: 1, far: 500 }); key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; s.add(key);
@@ -83,7 +66,9 @@ export class VABScene {
     const G = this.G; this.active = true; this.cam.enabled = true;
     const game = G.game;
     if (!this.design) this.design = cloneNode(game.designs[game.selectedDesign] || game.designs[0]);
-    this.cam.minDist = 3; this.cam.maxDist = 145; this.cam.pitch = 0.15; this.cam.yaw = 0.5;
+    const lvl = isCareer(game) ? (game.facility || 0) : 1;
+    if (lvl !== this.hallLevel) { if (this.hall) this.scene.remove(this.hall); this.hall = vabHall(lvl); this.scene.add(this.hall); this.hallLevel = lvl; this.scene.background.set(lvl ? 0x0b0e13 : 0x2a2418); }
+    this.cam.minDist = 3; this.cam.maxDist = HALL_LIMITS[lvl].maxDist; this.cam.pitch = 0.15; this.cam.yaw = 0.5;
     this.buildUI(); this.rebuild(true);
     if (!localStorage.getItem('bsp-vab-help')) { flash('Drag parts onto the green nodes · drag rocket parts to move them · right-click for options', 6000); try { localStorage.setItem('bsp-vab-help', '1'); } catch (e) {} }
   }
@@ -113,13 +98,17 @@ export class VABScene {
   setSym(n) { this.sym = n; this.symBtns?.forEach((b, i) => b.classList.toggle('on', SYMS[i] === n)); if (this.held) this.updateSnap(); }
   fillParts() {
     const q = this.query.toLowerCase();
+    const career = isCareer(this.G.game);
     const list = PARTS.filter(p => !p.hidden && (q ? (p.name + ' ' + p.basis + ' ' + p.id).toLowerCase().includes(q) : p.cat === this.cat));
+    if (career) list.sort((a, b) => partUnlocked(this.G.game, b.id) - partUnlocked(this.G.game, a.id)); // researched parts first
     const r = this.G.world.renderer;
     const items = list.map(p => {
       const img = h('img.part-icon', { alt: '', draggable: 'false' });
-      const el = h('div.part' + (p.theoretical ? '.theory' : ''), { title: p.basis },
-        img, h('div.part-txt', {}, h('div.n', {}, p.name), h('div.b', {}, 'Based on: ' + p.basis), h('div.s', {}, partSummary(p))));
-      el.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; e.preventDefault(); try { el.releasePointerCapture(e.pointerId); } catch (err) {} this.grabFromList(p.id, e); });
+      const locked = !partUnlocked(this.G.game, p.id); const node = locked ? TECH_BY_ID[nodeOfPart(p.id)] : null;
+      const el = h('div.part' + (p.theoretical ? '.theory' : '') + (locked ? '.locked' : ''), { title: p.basis },
+        img, h('div.part-txt', {}, h('div.n', {}, (locked ? '🔒 ' : '') + p.name), h('div.b', {}, locked ? `Research “${node?.name}” in R&D` : 'Based on: ' + p.basis),
+          h('div.s', {}, (career ? fmtFunds(p.cost || 0) + ' · ' : '') + partSummary(p))));
+      el.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; e.preventDefault(); try { el.releasePointerCapture(e.pointerId); } catch (err) {} if (locked) return flash(`🔒 ${p.name} needs “${node?.name}” (${node?.cost} TP) — research it in R&D`); this.grabFromList(p.id, e); });
       return { el, img, p };
     });
     this.partList.replaceChildren(...items.map(i => i.el));
@@ -376,7 +365,7 @@ export class VABScene {
     this.mesh.position.y = -box.min.y + 0.5;
     this.rocketRoot.add(this.mesh);
     this.height = box.max.y - box.min.y;
-    if (frame) { this.cam.dist = Math.min(145, Math.max(8, this.height * 1.6 + 5)); }
+    if (frame) { this.cam.dist = Math.min(this.cam.maxDist, Math.max(8, this.height * 1.6 + 5)); }
     this.focusY = this.mesh.position.y + (box.max.y + box.min.y) / 2;
     this.markSel();
     this.updateStats();
@@ -399,12 +388,21 @@ export class VABScene {
       h('table.kv', {}, row('Parts', st.parts), row('Mass (wet)', fmtMass(st.wet)), row('Mass (dry)', fmtMass(st.dry)), row('Crew seats', st.crew),
         row('Δv vacuum', (st.totalDvVac / 1000).toFixed(2) + ' km/s'), row('Δv sea level', (st.totalDvASL / 1000).toFixed(2) + ' km/s'), row('Liftoff TWR (Earth)', (st.stages[0]?.twr || 0).toFixed(2))),
       h('div.small.dim', { style: { marginTop: '6px' } }, 'Low Earth orbit needs ≈ 9.4 km/s. Liftoff needs TWR > 1.'),
+      isCareer(G.game) ? this.careerBox() : null,
       h('h3', { style: { marginTop: '10px' } }, 'Stages'),
       ...stages.map((s, i) => h('div.stage', {}, h('div.h', {}, 'Stage ' + (i + 1), h('span.mono', {}, (s.dvVac / 1000).toFixed(2) + ' km/s')),
         h('div.dim', {}, `TWR ${s.twr.toFixed(2)} (vac ${s.twrVac.toFixed(2)}) · burn ${fmtBurn(s.burn)}`),
         h('div.small', {}, summarize(st.placed, s.stage)))),
       selP ? h('div', { style: { marginTop: '10px' } }, h('h3', {}, selP.name), h('div.small.dim', {}, 'Based on: ' + selP.basis), h('div.small', {}, partSummary(selP, true)), selP.theoretical ? h('div.small', { style: { color: '#fbbf24' } }, '⚠ Theoretical concept — physics simplified.') : null) : null,
     ].filter(Boolean));
+  }
+  careerBox() {
+    const game = this.G.game, c = launchCheck(game, this.design), F = facility(game);
+    const lim = (v, m, f) => h('span' + (v > m ? '.bad' : ''), {}, f(v) + (m === Infinity ? '' : ' / ' + f(m)));
+    return h('div.career-box', {},
+      h('h3', {}, F.name),
+      h('table.kv', {}, row('Cost', lim(c.cost, game.funds, fmtFunds)), row('Mass', lim(c.mass, F.maxMass, (x) => x.toFixed(1) + ' t')), row('Parts', lim(c.parts, F.maxParts, String)), row('Height', lim(c.height, F.maxHeight, (x) => x.toFixed(1) + ' m'))),
+      c.problems.length ? h('div.small.bad', {}, "Can't launch: " + c.problems.join('; ')) : h('div.small.good', {}, '✓ Ready to launch'));
   }
   update(dt) {
     if (!this.active) return;
@@ -452,7 +450,7 @@ function ghostify(g, ok) {
   });
   g.traverse(o => { if (o.userData && o.userData.U) o.visible = false; });
 }
-function row(k, v) { return h('tr', {}, h('td.dim', {}, k), h('td', {}, String(v))); }
+function row(k, v) { return h('tr', {}, h('td.dim', {}, k), h('td', {}, v instanceof Node ? v : String(v))); }
 function fmtBurn(s) { if (!s) return '—'; if (s < 120) return s.toFixed(0) + ' s'; if (s < 7200) return (s / 60).toFixed(1) + ' min'; if (s < 172800) return (s / 3600).toFixed(1) + ' h'; return (s / 86400).toFixed(0) + ' d'; }
 function summarize(placed, stage) {
   const c = {}; for (const p of placed) if (p.stage === stage && (p.part.engine || p.part.decoupler || p.part.chute)) c[p.part.name] = (c[p.part.name] || 0) + 1;
