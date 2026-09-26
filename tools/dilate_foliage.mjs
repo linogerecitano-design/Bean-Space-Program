@@ -42,7 +42,7 @@ let n = 0;
 for (const f of fs.readdirSync(DIR).filter(f => f.endsWith('.glb'))) {
   const doc = await io.read(path.join(DIR, f)); let changed = false;
   for (const m of doc.getRoot().listMaterials()) {
-    const tex = m.getBaseColorTexture(); if (!tex || m.getAlphaMode() === 'OPAQUE') continue;
+    const tex = m.getBaseColorTexture(); if (!tex) continue;
     const img = sharp(Buffer.from(tex.getImage())); const md = await img.metadata(); if (!md.hasAlpha) continue;
     const { data, info } = await img.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     let holes = 0; for (let i = 3; i < data.length; i += 4) if (data[i] < 128) holes++;

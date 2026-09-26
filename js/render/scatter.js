@@ -71,6 +71,7 @@ const TRI_BUDGET = { rock: IS_MOBILE ? 60e3 : 250e3, tree: IS_MOBILE ? 150e3 : 6
 const loader = makeGLTFLoader();
 const lib = new Map();
 let libPromise = null;
+export const _scatterLib = lib; // (debug/tests)
 const windUniforms = { uTime: { value: 0 } };
 export function scatterTime(t) { windUniforms.uTime.value = t; }
 
@@ -144,9 +145,10 @@ async function loadModel(t) {
     const geo = geos.length > 1 ? mergeGeometries(geos) : geos[0];
     geo.computeBoundingBox(); box.union(geo.boundingBox);
     const mat = m.clone();
-    const foliage = t.kind !== 'rock' && (m.alphaTest > 0 || m.transparent || m.map && /leaf|leaves|grass|fol|needle|petal|flower/i.test(m.name + (m.map?.name || '')));
+    const foliage = t.kind !== 'rock' && (m.alphaTest > 0 || m.transparent || m.map && /leaf|leaves|grass|fol|needle|petal|flower|twig|frond/i.test(m.name + (m.map?.name || '')));
     // cut-out card without any alpha: it would draw as a solid quad, so the model is left out
-    if (foliage && (m.alphaTest > 0 || m.transparent) && m.map && !hasAlpha(m.map)) broken = true;
+    // (also when the GLB marks the card material opaque, e.g. fir twigs: those drew as solid dark quads)
+    if (foliage && m.map && !hasAlpha(m.map)) broken = true;
     if (t.kind !== 'rock') { mat.side = THREE.DoubleSide; mat.alphaTest = Math.max(0.4, m.alphaTest || 0); mat.transparent = false; }
     // no normal maps on foliage: on thin leaf and blade cards the screen-space tangent frame underflows in
     // mobile GPU precision and turns the lighting NaN (black plants); the bump is invisible at this size anyway

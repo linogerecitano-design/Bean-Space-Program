@@ -83,7 +83,9 @@ for (const f of fs.readdirSync(DIR).filter(f => f.endsWith('.glb'))) {
   const doc = await io.read(path.join(DIR, f));
   let changed = false, orig = null;
   for (const m of doc.getRoot().listMaterials()) {
-    const tex = m.getBaseColorTexture(); if (!tex || m.getAlphaMode() === 'OPAQUE') continue;
+    const tex = m.getBaseColorTexture(); if (!tex) continue;
+    // cut-out cards are sometimes exported as OPAQUE (grass_bermuda, flower_gazania): judge those by name
+    if (m.getAlphaMode() === 'OPAQUE' && !/leaf|leaves|grass|fol|needle|petal|flower|twig|frond/i.test(m.getName())) continue;
     const img = sharp(Buffer.from(tex.getImage()));
     const md = await img.metadata(); if (md.hasAlpha) continue;
     const { data: rgb, info } = await img.removeAlpha().raw().toBuffer({ resolveWithObject: true });
