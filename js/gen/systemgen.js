@@ -64,7 +64,14 @@ export function styleFor(cls, r, T) {
       if (cls === 'hotjupiter') s.emissive = [1.0, 0.35, 0.1];
       if (cls !== 'minineptune' && cls !== 'hotjupiter' && r() < (cls === 'icegiant' ? 0.55 : 0.35)) {
         const inner = 1.2 + r() * 0.4;
-        s.rings = { inner, outer: inner + 0.3 + r() * 1.2, profile: r() < 0.4 ? 'saturn' : r() < 0.5 ? 'uranus' : 'faint', color: pal(r, [0.75, 0.68, 0.58], 0.3), seed: Math.floor(r() * 1e6) };
+        // composition follows temperature: bright water-ice rings only survive beyond the frost line; warmer
+        // giants keep dark, dusty rock/carbon rings (narrow ringlets or a faint sheet), never vivid colours
+        const icy = (T ?? 100) < 170 && r() < 0.75;
+        const ice = [[0.86, 0.82, 0.75], [0.82, 0.8, 0.78], [0.84, 0.77, 0.66], [0.78, 0.76, 0.74]][Math.floor(r() * 4)];
+        const dust = [[0.38, 0.36, 0.34], [0.45, 0.4, 0.35], [0.33, 0.32, 0.33], [0.5, 0.44, 0.38]][Math.floor(r() * 4)];
+        const profile = icy ? (r() < 0.8 ? 'saturn' : 'uranus') : (r() < 0.55 ? 'uranus' : 'faint');
+        const width = profile === 'saturn' ? 0.5 + r() * 0.9 : profile === 'uranus' ? 0.15 + r() * 0.4 : 0.4 + r() * 1.0;
+        s.rings = { inner, outer: inner + width, profile, color: pal(r, icy ? ice : dust, 0.05), seed: Math.floor(r() * 1e6) };
       }
       return s;
     }

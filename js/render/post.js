@@ -49,6 +49,7 @@ const ATMO_COMMON = /* glsl */`
 struct Atmo {
   vec3 C; float R; float Ra; float cG; float cA; vec3 betaR; float betaM; vec3 mieColor; float HR; float HM; float g;
   float hasClouds; float Rb; float Rt; float cB; float cT; float coverage; float cloudTex; float opaque; vec3 cloudColor; float cloudRot; mat3 w2b; float thin; float stack; float real2D;
+  float oblate; vec3 pole; // oblateness (gas giants) and spin axis
 };
 uniform Atmo uA[${MAX_ATMO}];
 uniform int uNumA;
@@ -65,12 +66,14 @@ float sceneDist(vec2 uv, vec3 rd) {
 }
 float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 // optical depth toward the sun from p (short march)
-vec2 sunDepth(Atmo A, vec3 p) {
-  vec2 ts = raySphereO(p, uSunDir, A.C, A.Ra);
-  vec2 tg = raySphereO(p, uSunDir, A.C, A.R * 0.9985);
+vec2 sunDepthD(Atmo A, vec3 p, vec3 sdir);
+vec2 sunDepth(Atmo A, vec3 p) { return sunDepthD(A, p, uSunDir); }
+vec2 sunDepthD(Atmo A, vec3 p, vec3 sdir) {
+  vec2 ts = raySphereO(p, sdir, A.C, A.Ra);
+  vec2 tg = raySphereO(p, sdir, A.C, A.R * 0.9985);
   if (tg.x > 0.0 && tg.x < 1e29) return vec2(1e9);
   float L = max(ts.y, 0.0); float dt = L / 4.0; vec2 od = vec2(0.0);
-  for (int i = 0; i < 4; i++) { vec3 q = p + uSunDir * dt * (float(i) + 0.5); float h = length(q - A.C) - A.R; od += exp(-max(h, 0.0) / vec2(A.HR, A.HM)) * dt; }
+  for (int i = 0; i < 4; i++) { vec3 q = p + sdir * dt * (float(i) + 0.5); float h = length(q - A.C) - A.R; od += exp(-max(h, 0.0) / vec2(A.HR, A.HM)) * dt; }
   return od;
 }
 `;
@@ -91,6 +94,8 @@ export class Pipeline {
     this.cloudRT = mkRT(Math.ceil(S.x / 2), Math.ceil(S.y / 2), false);
     this.cloudHist = [mkRT(Math.ceil(S.x / 2), Math.ceil(S.y / 2), false), mkRT(Math.ceil(S.x / 2), Math.ceil(S.y / 2), false)]; this.histI = 0; this.histValid = false; this.frame = 0;
     this.hdrRT = mkRT(S.x, S.y, false);
+    // half-resolution launch volumetrics (smoke, frost vapour), marched against the scene depth
+    this.volRT = mkRT(Math.ceil(S.x / 2), Math.ceil(S.y / 2), false);
     this.bloom = []; let w = S.x, h = S.y; for (let i = 0; i < 5; i++) { w = Math.max(1, w >> 1); h = Math.max(1, h >> 1); this.bloom.push(mkRT(w, h, false)); }
     this.noise3 = makeCloudNoise(IS_MOBILE ? 48 : 64);
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -98,7 +103,7 @@ export class Pipeline {
     this.qscene = new THREE.Scene(); this.qscene.add(this.quad);
     const atmoUniforms = () => {
       const arr = []; for (let i = 0; i < MAX_ATMO; i++) arr.push({ C: new THREE.Vector3(), R: 1, Ra: 1, cG: 1, cA: 1, betaR: new THREE.Vector3(), betaM: 0, mieColor: new THREE.Vector3(1, 1, 1), HR: 8000, HM: 1200, g: 0.76,
-        hasClouds: 0, Rb: 1, Rt: 1, cB: 1, cT: 1, coverage: 0.5, cloudTex: 0, opaque: 0, cloudColor: new THREE.Vector3(1, 1, 1), cloudRot: 0, w2b: new THREE.Matrix3(), thin: 0, stack: 0, real2D: 0 });
+        hasClouds: 0, Rb: 1, Rt: 1, cB: 1, cT: 1, coverage: 0.5, cloudTex: 0, opaque: 0, cloudColor: new THREE.Vector3(1, 1, 1), cloudRot: 0, w2b: new THREE.Matrix3(), thin: 0, stack: 0, real2D: 0, oblate: 0, pole: new THREE.Vector3(0, 1, 0) });
       return arr;
     };
     this.common = {
@@ -316,15 +321,15 @@ export class Pipeline {
         }`,
     });
     this.compMat = new THREE.ShaderMaterial({
-      uniforms: { ...this.common, uScene: { value: this.sceneRT.texture }, uClouds: { value: this.cloudRT.texture }, uCloudTexel: { value: new THREE.Vector2(1, 1) }, uSteps: { value: settings.q.atmoSteps }, uSSS: { value: settings.q.shadow >= 2048 ? 1 : 0 } },
+      uniforms: { ...this.common, uScene: { value: this.sceneRT.texture }, uClouds: { value: this.cloudRT.texture }, uCloudTexel: { value: new THREE.Vector2(1, 1) }, uVol: { value: this.volRT.texture }, uHasVol: { value: 0 }, uSteps: { value: settings.q.atmoSteps }, uSSS: { value: settings.q.shadow >= 2048 ? 1 : 0 } },
       vertexShader: FSQ_V,
       fragmentShader: `${ATMO_COMMON}
-        uniform sampler2D uScene, uClouds; uniform int uSteps; uniform float uSSS; uniform vec2 uCloudTexel; varying vec2 vUv;
+        uniform sampler2D uScene, uClouds, uVol; uniform int uSteps; uniform float uSSS, uHasVol; uniform vec2 uCloudTexel; varying vec2 vUv;
         // Depth-aware upsample of the half-resolution clouds: each low-res texel is weighted by how well the depth
         // it was marched against matches this pixel's. A plain bilinear fetch bled bright cloud/sky into every
         // leaf, branch and antenna standing against the sky as white speckles and halos.
         float viewZ(vec2 uv) { float d = texture(uDepth, uv).r; return d >= 0.99999 ? 1e30 : exp2(d * uLogFar) - 1.0; }
-        vec4 cloudsAt(vec2 uv) {
+        vec4 upsample(sampler2D tex, vec2 uv) {
           float z = viewZ(uv);
           vec2 p = uv / uCloudTexel - 0.5; vec2 f = fract(p), b = floor(p);
           vec4 acc = vec4(0.0); float ws = 0.0; vec4 nearest = vec4(0.0, 0.0, 0.0, 1.0); float nd = 1e38;
@@ -333,7 +338,7 @@ export class Pipeline {
             float zi = viewZ(tuv);
             float rel = (z > 1e29 && zi > 1e29) ? 0.0 : (z > 1e29 || zi > 1e29) ? 1e3 : abs(zi - z) / max(min(zi, z), 0.5);
             float wb = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
-            vec4 c = texture(uClouds, tuv);
+            vec4 c = texture(tex, tuv);
             float w = wb * exp(-rel * 12.0);
             acc += c * w; ws += w;
             if (rel < nd) { nd = rel; nearest = c; }
@@ -362,17 +367,27 @@ export class Pipeline {
           vec3 col = texture(uScene, vUv).rgb;
           // near-field only (vessels, rocks, boulders): at kilometre scales depth precision makes it unreliable
           if (uSSS > 0.5 && sd < 1500.0) { float sh = ssShadow(rd, sd); col *= mix(mix(0.25, 1.0, sh), 1.0, smoothstep(700.0, 1500.0, sd)); }
-          vec4 cl = cloudsAt(vUv);
+          if (uHasVol > 0.5) { vec4 vo = upsample(uVol, vUv); col = col * (1.0 - vo.a) + vo.rgb; }
+          vec4 cl = upsample(uClouds, vUv);
           col = col * cl.a + cl.rgb;
           for (int ai = 0; ai < ${MAX_ATMO}; ai++) {
             if (ai >= uNumA) break;
             Atmo A = uA[ai];
-            vec2 ta = raySphere(rd, A.C, A.cA);
+            // oblate planets: march in a space stretched along the pole, where the planet and its shells
+            // are spheres again (otherwise the shell floats off the poles of a flattened gas giant)
+            vec3 rdA = rd, sunA = uSunDir; float Lk = 1.0;
+            if (A.oblate > 0.0) {
+              float kx = 1.0 / (1.0 - A.oblate) - 1.0; vec3 n = A.pole;
+              rdA = rd + kx * dot(rd, n) * n; Lk = length(rdA); rdA /= Lk;
+              A.C += kx * dot(A.C, n) * n; float c2 = dot(A.C, A.C); A.cG = c2 - A.R * A.R; A.cA = c2 - A.Ra * A.Ra;
+              sunA = normalize(uSunDir + kx * dot(uSunDir, n) * n);
+            }
+            vec2 ta = raySphere(rdA, A.C, A.cA);
             if (ta.y < 0.0 || ta.x > 1e29) continue;
-            vec2 tg = raySphere(rd, A.C, A.cG);
+            vec2 tg = raySphere(rdA, A.C, A.cG);
             float t0 = max(ta.x, 0.0), t1 = ta.y;
             if (tg.x > 0.0 && tg.x < 1e29) t1 = min(t1, tg.x);
-            t1 = min(t1, sd);
+            t1 = min(t1, sd < 1e29 ? sd * Lk : sd);
             if (t1 <= t0) continue;
             int N = uSteps; float L = t1 - t0;
             vec2 od = vec2(0.0); vec3 sR = vec3(0.0), sM = vec3(0.0);
@@ -381,10 +396,10 @@ export class Pipeline {
               // quadratic spacing: dense near the camera where the air is thickest on horizon paths
               float u0 = float(i) / float(N), u1 = float(i + 1) / float(N);
               float qx = t0 <= 0.0 ? 2.0 : 1.0; float sA = t0 + L * pow(u0, qx), sB = t0 + L * pow(u1, qx); float dt = sB - sA;
-              vec3 p = rd * (0.5 * (sA + sB));
+              vec3 p = rdA * (0.5 * (sA + sB));
               float h = max(length(p - A.C) - A.R, 0.0);
               vec2 dd = exp(-h / vec2(A.HR, A.HM)) * dt; od += dd;
-              vec2 ls = sunDepth(A, p);
+              vec2 ls = sunDepthD(A, p, sunA);
               vec3 Tr = exp(-(A.betaR * (od.x + ls.x) + A.betaM * 1.1 * (od.y + ls.y)));
               sR += dd.x * Tr; sM += dd.y * Tr;
             }
@@ -455,7 +470,7 @@ export class Pipeline {
   noiseDummy() { if (!this._dummy) { this._dummy = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); this._dummy.needsUpdate = true; } return this._dummy; }
   setSize(w, h) {
     this.sceneRT.setSize(w, h); this.sceneRT.depthTexture.image.width = w; this.sceneRT.depthTexture.image.height = h;
-    this.cloudRT.setSize(Math.ceil(w / 2), Math.ceil(h / 2)); this.hdrRT.setSize(w, h);
+    this.cloudRT.setSize(Math.ceil(w / 2), Math.ceil(h / 2)); this.hdrRT.setSize(w, h); this.volRT.setSize(Math.ceil(w / 2), Math.ceil(h / 2));
     this.compMat.uniforms.uCloudTexel.value.set(1 / Math.ceil(w / 2), 1 / Math.ceil(h / 2));
     for (const rt of this.cloudHist) rt.setSize(Math.ceil(w / 2), Math.ceil(h / 2)); this.histValid = false;
     let bw = w, bh = h; for (const b of this.bloom) { bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1); b.setSize(bw, bh); }
@@ -492,7 +507,7 @@ export class Pipeline {
         if (cl.map && nMaps < 2) { hasMap = 1; if (nMaps === 0) map = cl.map; else map1 = cl.map; nMaps++; u.cloudTex = nMaps; }
         if (a.real2D) { this.cloudMat.uniforms.uCloudReal.value = a.real2D; u.real2D = 1; }
       }
-      u.w2b.copy(a.w2b);
+      u.w2b.copy(a.w2b); u.oblate = a.oblate || 0; if (a.pole) u.pole.copy(a.pole);
     }
     this.cloudMat.uniforms.uHasMap.value = hasMap; this.cloudMat.uniforms.uCloudMap.value = map || this.noiseDummy(); this.cloudMat.uniforms.uCloudMap1.value = map1 || this.noiseDummy(); if (!this.cloudMat.uniforms.uCloudReal.value) this.cloudMat.uniforms.uCloudReal.value = this.noiseDummy();
     const anyClouds = list.slice(0, U.uNumA.value).some(a => a.clouds);
@@ -515,6 +530,11 @@ export class Pipeline {
     } else {
       r.setRenderTarget(this.cloudRT); r.setClearColor(0x000000, 1); r.clear(); this.compMat.uniforms.uClouds.value = this.cloudRT.texture; this.histValid = false;
     }
+    // launch volumetrics (smoke, vapour) into their own buffer, stopping at the scene depth
+    let hasVol = false;
+    if (frame.vol) for (const m of frame.vol.children) if (m.visible && m.userData.vol) { hasVol = true; const V = m.userData.U; V.uDepth.value = this.sceneRT.depthTexture; V.uRes.value.set(this.volRT.width, this.volRT.height); V.uLogFar.value = U.uLogFar.value; }
+    this.compMat.uniforms.uHasVol.value = hasVol ? 1 : 0;
+    if (hasVol) { const cc = new THREE.Color(); r.getClearColor(cc); const ca = r.getClearAlpha(); r.setRenderTarget(this.volRT); r.setClearColor(0x000000, 0); r.clear(); r.render(frame.vol, camera); r.setClearColor(cc, ca); }
     const sssQ = this.compMat.uniforms.uSSS.value; if (frame.sss === false) this.compMat.uniforms.uSSS.value = 0;
     this.pass(this.compMat, this.hdrRT);
     this.compMat.uniforms.uSSS.value = sssQ;

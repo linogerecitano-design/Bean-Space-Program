@@ -283,13 +283,54 @@ export function giantParams(body) {
     for (let i = 0; i < n; i++) P.spots.push({ ...SPOT, lon: r() * 360 - 180, lat: (r() - 0.5) * 110, size: i === 0 ? 0.08 + r() * 0.12 : 0.03 + r() * 0.07, aspect: 1.3 + r() * 0.8, spin: (r() < 0.5 ? -1 : 1) * (1.4 + r() * 1.6), tint: 0.3 + r() * 0.4, color: grad[Math.floor(r() * grad.length)][1] });
     if (i0(r) < 0.2) { P.spots.unshift({ ...SPOT, lon: r() * 360 - 180, lat: (r() < 0.5 ? -1 : 1) * (15 + r() * 30), size: 0.18 + r() * 0.1, spin: 2.6, tint: 0.65, color: '#' + ['b8412a', '6a2a8a', '2a5ab8', 'e0e0d0'][Math.floor(r() * 4)] }); }
     P.smallCount = Math.floor(r() * 24);
-    // blend the preset gradient with this planet's own palette for colour variety
-    const bands = st.bands || [];
-    if (bands.length) grad = grad.map(([t, c], k) => { const b = bands[k % bands.length]; const a = hex2rgb(c); const m = 0.35; return [t, '#' + a.map((v, q) => Math.round(Math.min(1, v * (1 - m) + b[q] * m) * 255).toString(16).padStart(2, '0')).join('')]; });
+    // its own palette (the presets only lend their flow character), and a much wider spread of band
+    // structure, jets, turbulence and haze so no two giants read alike
+    if (name !== 'Toxic Alien') grad = proceduralGradient(r, body.class);
+    const u = (a, b) => a + (b - a) * r();
+    P.bandCount = Math.round(u(body.class === 'icegiant' || body.class === 'minineptune' ? 3 : 6, body.class === 'jovian' ? 30 : 16));
+    P.bandContrast = u(0.18, 0.8); P.bandSharp = u(0.6, 2.8); P.bandIrreg = u(0.12, 0.5); P.bandWobble = u(0.2, 0.8); P.bandVariety = u(0.1, 0.35);
+    P.zonal = u(0.6, 1.3); P.turb = u(0.2, 1.0); P.turbScale = u(1.6, 3.8); P.eddyAspect = u(1.8, 6.0); P.evolve = u(0.2, 0.55);
+    P.detailAmp = u(0.12, 0.32); P.detailAniso = u(2.0, 5.0); P.warpAmt = u(0.25, 0.65); P.filament = u(0.03, 0.2); P.wisp = u(0.04, 0.16);
+    P.hazeAmt = u(0.1, 0.7); P.hazeThresh = u(0.45, 0.62); P.hazeAniso = u(2, 5);
+    const top = hex2rgb(grad[grad.length - 1][1]), bot = hex2rgb(grad[0][1]);
+    const hx = (c) => '#' + c.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
+    P.hazeColor = hx(top.map(v => v * 0.6 + 0.38)); P.poleColor = hx(bot.map((v, i) => v * 0.7 + top[i] * 0.3)); P.poleAmt = u(0.1, 0.5);
+    P.eqWarm = body.class === 'jovian' ? u(0, 0.4) : u(0, 0.1); P.saturation = u(0.85, 1.15); P.contrast = u(0.95, 1.1);
+    P.smallCol = grad[Math.floor(r() * grad.length)][1];
+    for (const sp of P.spots) sp.color = r() < 0.5 ? grad[Math.floor(r() * grad.length)][1] : sp.color;
   }
   return { name, P, grad };
 }
 const i0 = (r) => r();
+// ---------------------------------------------------------------- per-planet palettes
+function hsl2hex(h, s, l) {
+  h = ((h % 360) + 360) % 360 / 360; const f = (n) => { const k = (n + h * 12) % 12; const a = s * Math.min(l, 1 - l); return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  return '#' + [f(0), f(8), f(4)].map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
+}
+// Colour families by cloud chemistry (Sudarsky classes): ammonia decks are cream/tan/brown with rusty
+// belts, water-cloud giants bright white-grey, cloudless ones azure, hot ones dark maroon/charcoal,
+// ice giants cyan to deep blue. Each planet draws its own hue, saturation and lightness ramp.
+const FAMILIES = {
+  jovian:      { hue: [22, 42], sat: [0.25, 0.55], lo: [0.22, 0.4], hi: [0.86, 0.95], accents: [[12, 0.55], [35, 0.35], [200, 0.12], [48, 0.4]] },
+  sudarsky2:   { hue: [200, 230], sat: [0.05, 0.18], lo: [0.45, 0.62], hi: [0.92, 0.98], accents: [[40, 0.12], [210, 0.2]] },
+  sudarsky3:   { hue: [205, 225], sat: [0.45, 0.7], lo: [0.18, 0.3], hi: [0.7, 0.85], accents: [[190, 0.4], [240, 0.35]] },
+  hotjupiter:  { hue: [0, 22], sat: [0.25, 0.55], lo: [0.06, 0.12], hi: [0.4, 0.58], accents: [[30, 0.6], [340, 0.3], [0, 0.0]] },
+  icegiant:    { hue: [175, 225], sat: [0.3, 0.6], lo: [0.2, 0.4], hi: [0.82, 0.93], accents: [[160, 0.3], [230, 0.45], [195, 0.15]] },
+  minineptune: { hue: [150, 215], sat: [0.12, 0.35], lo: [0.4, 0.55], hi: [0.86, 0.94], accents: [[45, 0.15], [260, 0.18]] },
+};
+function proceduralGradient(r, cls) {
+  const F = FAMILIES[cls] || FAMILIES.jovian;
+  const rr = (a) => a[0] + (a[1] - a[0]) * r();
+  const hue = rr(F.hue), sat = rr(F.sat), lo = rr(F.lo), hi = rr(F.hi);
+  const n = 6 + Math.floor(r() * 4), stops = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    let h = hue + (r() - 0.5) * 18 + (t - 0.5) * (r() - 0.5) * 30, sa = sat * (0.7 + 0.6 * r()) * (1 - 0.5 * Math.pow(t, 3)), l = lo + (hi - lo) * Math.pow(t, 0.8 + r() * 0.5);
+    if (i > 0 && i < n - 1 && r() < 0.28) { const a = F.accents[Math.floor(r() * F.accents.length)]; h = a[0] + (r() - 0.5) * 16; sa = a[1] * (0.7 + 0.6 * r()); }
+    stops.push([t, hsl2hex(h, Math.min(1, sa), Math.min(0.97, l))]);
+  }
+  return stops;
+}
 
 export class GasGiantBaker {
   constructor(renderer) {

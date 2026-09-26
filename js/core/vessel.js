@@ -227,6 +227,15 @@ export class Vessel {
     if (recalc) this.recalc();
     return group;
   }
+  // a part burned or broke away: it leaves with everything attached through it (returns the lost parts)
+  breakOff(p) {
+    const nodes = new Set(); walk(p.pl.node, n => nodes.add(n));
+    const group = this.livingParts().filter(q => nodes.has(q.pl.node) && (!p.pl.radial || q.pl.sideIndex === p.pl.sideIndex));
+    if (!group.includes(p)) group.push(p);
+    for (const q of group) q.attached = false;
+    this.recalc();
+    return group;
+  }
   // ---------------------------------------------------------- engines & resources
   pressureAtm() { if (!this.body || !this.body.atmo) return 0; const alt = this.r.len() - this.body.radius; return this.body.pressure(alt) / 101.325; }
   engineState(dtBurn = 0, ctx = {}) {

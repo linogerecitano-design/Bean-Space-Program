@@ -211,7 +211,10 @@ export function makeTerrainMaterial(body) {
           vec3 site = mix(vec3(0.075, 0.11, 0.04), vec3(0.14, 0.14, 0.07), smoothstep(0.35, 0.75, n1));
           site = mix(site, vec3(0.2, 0.18, 0.12), smoothstep(0.7, 0.85, n2) * 0.7);
           site *= 0.85 + 0.3 * vnoise(sp / 9.0);
-          macroCol = mix(macroCol, site, 1.0 - smoothstep(uSiteR * 0.55, uSiteR, sa));
+          macroCol = mix(macroCol, site, 1.0 - smoothstep(uSiteR * 0.5, uSiteR * (1.6 + 0.5 * n2), sa));
+          // land built where the coarse satellite image shows lagoon/sea: paint it as coastal scrub, not blue
+          float wl = smoothstep(0.015, 0.06, macroCol.b - max(macroCol.r, macroCol.g * 0.8)) * (1.0 - smoothstep(0.18, 0.32, lum(macroCol)));
+          macroCol = mix(macroCol, site, wl * (1.0 - smoothstep(uSiteR * 5.0, uSiteR * 7.0, sa)));
         }
         vec3 nGeo = normalize(vNBF);
         if (uHasHeight > 0.5) {

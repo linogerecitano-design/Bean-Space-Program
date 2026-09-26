@@ -333,7 +333,9 @@ export class Surface {
     const [lat, lon] = dirToLatLon(x, y, z);
     if (this.maps && this.maps.water) {
       const wSharp = sampleEq(this.maps.water, lat, lon), wBlur = sampleEq({ ...this.maps.water, data: this.maps.waterBlur }, lat, lon);
-      const coast = (1 - wSharp) - 0.5 + 0.18 * n.fbm(x * 400, y * 400, z * 400, 4) * (1 - Math.abs(wSharp * 2 - 1) * 0.7);
+      // the coarse water mask puts the Cape's facilities in the lagoons: grow the land around the site
+      // along an irregular (noise-warped) outline instead of stamping a round island onto the sea
+      const coast = (1 - wSharp) - 0.5 + 0.18 * n.fbm(x * 400, y * 400, z * 400, 4) * (1 - Math.abs(wSharp * 2 - 1) * 0.7) + this.siteLand(x, y, z);
       let h;
       if (coast > 0) {
         const topo = sampleEq(this.hmap, lat, lon);
@@ -364,6 +366,13 @@ export class Surface {
 
   // Cape Canaveral area: flat coastal land around the space centre with the Atlantic beach to
   // the east, blended into the global elevation data further out.
+  siteLand(x, y, z) {
+    if (!this.site) return 0;
+    const s = this.site; const dx = x - s[0], dy = y - s[1], dz = z - s[2];
+    const dist = Math.hypot(dx, dy, dz) * this.R; if (dist > 40000) return 0;
+    const n = this.n; const warp = 5500 * n.fbm(x * 900 + 11, y * 900, z * 900, 4) + 1500 * n.fbm(x * 4000, y * 4000 + 5, z * 4000, 3);
+    return 1.2 * (1 - sstep(9000, 26000, dist + warp));
+  }
   siteHeight(x, y, z, hGlobal) {
     const s = this.site; const dx = x - s[0], dy = y - s[1], dz = z - s[2];
     const R = this.R; const ex = (dx * this.siteE[0] + dy * this.siteE[1] + dz * this.siteE[2]) * R, no = (dx * this.siteN[0] + dy * this.siteN[1] + dz * this.siteN[2]) * R;
@@ -379,7 +388,13 @@ export class Surface {
       h -= 1.5 * sstep(-900, -140, off) * (1 - flat * 0.6); // low dune slack behind the beach
     } else if (off < 60) { // beach and dune
       const t = (off + 140) / 200; h = mix(LAUNCH_SITE.alt - 1.2 + 2.2 * Math.exp(-((t - 0.25) ** 2) / 0.01), 0.4, sstep(0.3, 1, t));
-    } else { h = 0.4 - Math.min(18, off * 0.0065) - 6 * sstep(2000, 9000, off); } // shelving sea floor
+    } else { // shelving sea floor that runs into the real bathymetry with distance from the beach (not from the pad)
+      h = 0.4 - Math.min(18, off * 0.0065) - 6 * sstep(2000, 9000, off);
+      if (hGlobal < h) h = mix(h, hGlobal, sstep(1500, 14000, off));
+    }
+    // sea and lagoons beyond the facilities keep the global (mask-following) shoreline; blending a flat
+    // plain into deep water over a fixed radius drew a circular coast
+    if (hGlobal < 0 && off < -140 && dist > 7000) return hGlobal;
     const k = sstep(25000, 45000, dist);
     return mix(h, hGlobal, k);
   }

@@ -99,17 +99,19 @@ export function makePlume(nozzleR, color = [1.0, 0.62, 0.3], kind = 'chem') {
 }
 
 // ---------------------------------------------------------------- re-entry plasma
-// Local frame: +y points into the airflow, the vessel is a capsule (uA..uB, radius uRad). A bright
-// stagnation layer hugs the windward side; streaky ionised wake trails downstream.
+// Local frame: +y points into the airflow, the vessel is a capsule (uA..uB, radius uRad), all in units
+// of the mesh scale. A white-hot shock layer sits on the windward face; turbulent flame tongues peel
+// off the shoulders and stream downstream, cooling from yellow-white through orange to deep red, with a
+// faint violet air glow at the highest heating. uK (0..1) is the heating intensity.
 export function makePlasma() {
-  const U = { uK: { value: 0 }, uTime: { value: 0 }, uCamLocal: { value: new THREE.Vector3() }, uBMin: { value: new THREE.Vector3(-1, -2.4, -1) }, uBMax: { value: new THREE.Vector3(1, 1, 1) },
-    uA: { value: new THREE.Vector3(0, -0.3, 0) }, uB: { value: new THREE.Vector3(0, 0.3, 0) }, uRad: { value: 0.2 }, uSteps: { value: steps(0.8) } };
-  const geo = new THREE.BoxGeometry(2, 3.4, 2); geo.translate(0, -0.7, 0);
+  const U = { uK: { value: 0 }, uTime: { value: 0 }, uCamLocal: { value: new THREE.Vector3() }, uBMin: { value: new THREE.Vector3(-1, -4.2, -1) }, uBMax: { value: new THREE.Vector3(1, 1, 1) },
+    uA: { value: new THREE.Vector3(0, -0.3, 0) }, uB: { value: new THREE.Vector3(0, 0.3, 0) }, uRad: { value: 0.2 }, uSteps: { value: steps(1.0) }, uSeed: { value: Math.random() * 50 } };
+  const geo = new THREE.BoxGeometry(2, 5.2, 2); geo.translate(0, -1.6, 0);
   const mat = new THREE.ShaderMaterial({
     uniforms: U, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, side: THREE.BackSide,
     vertexShader: VERT,
     fragmentShader: `${COMMON}
-      uniform float uK, uRad; uniform vec3 uA, uB;
+      uniform float uK, uRad, uSeed; uniform vec3 uA, uB;
       vec3 closest(vec3 p){ vec3 ab = uB - uA; float h = clamp(dot(p - uA, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0); return uA + ab * h; }
       float capsuleHit(vec3 ro, vec3 rd){ // first hit distance with the vessel capsule (or 1e9)
         vec3 ba = uB - uA, oa = ro - uA; float baba = dot(ba, ba), bard = dot(ba, rd), baoa = dot(ba, oa), rdoa = dot(rd, oa), oaoa = dot(oa, oa);
@@ -119,12 +121,18 @@ export function makePlasma() {
           vec3 oc = (y <= 0.0) ? oa : ro - uB; b = dot(rd, oc); c = dot(oc, oc) - uRad * uRad; h = b * b - c; if (h > 0.0) { t = -b - sqrt(h); if (t > 0.0) return t; } }
         return 1e9;
       }
+      // flame colour by temperature (0 cool .. 1 hottest)
+      vec3 fire(float T){
+        vec3 c = mix(vec3(0.35, 0.03, 0.005), vec3(1.0, 0.28, 0.04), smoothstep(0.0, 0.35, T));
+        c = mix(c, vec3(1.0, 0.62, 0.18), smoothstep(0.3, 0.65, T));
+        return mix(c, vec3(1.0, 0.93, 0.8), smoothstep(0.65, 1.0, T));
+      }
       void main(){
         #include <logdepthbuf_fragment>
         vec3 ro = uCamLocal, rd = normalize(vLocal - uCamLocal);
         vec2 th = boxHit(ro, rd); float t0 = max(th.x, 0.0), t1 = min(th.y, capsuleHit(ro, rd)); if (t1 <= t0) discard;
         int N = uSteps; float dt = (t1 - t0) / float(N); float t = t0 + dt * ign(gl_FragCoord.xy);
-        vec3 hotC = mix(vec3(1.0, 0.32, 0.08), vec3(1.0, 0.62, 0.85), smoothstep(0.4, 1.0, uK));
+        float tm = mod(uTime, 300.0);
         vec3 col = vec3(0.0);
         for (int i = 0; i < 64; i++) {
           if (i >= N) break;
@@ -132,21 +140,29 @@ export function makePlasma() {
           vec3 c = closest(p); vec3 dv = p - c; float dist = length(dv); float sd = dist - uRad;
           vec3 nrm = dv / max(dist, 1e-4);
           float wind = dot(nrm, vec3(0.0, 1.0, 0.0));
-          // stagnation layer: thin, brightest where the surface faces the flow
-          float layer = exp(-max(sd, 0.0) / (0.02 + 0.03 * max(wind, 0.0))) * smoothstep(0.15, 0.95, wind);
-          // detached bow shock just ahead of the windward face
-          float shell = exp(-pow((sd - 0.06 - 0.05 * (1.0 - wind)) / 0.03, 2.0)) * smoothstep(0.3, 0.9, wind) * 0.6;
-          // wake: hot gas peeling off the body's edges, streaming downstream in filaments
-          vec2 dxz = p.xz - c.xz; float behind = c.y - p.y;
-          float w = uRad * (0.7 + 0.25 * max(behind, 0.0));
-          float tm = mod(uTime, 300.0);
-          float n = snoise(vec3(p.x * 14.0, p.y * 1.2 + tm * 11.0, p.z * 14.0)) * 0.5 + 0.5;
-          float n2 = snoise(vec3(p.x * 5.0 + 3.1, p.y * 0.6 + tm * 6.0, p.z * 5.0)) * 0.5 + 0.5;
-          float wake = exp(-pow(length(dxz) / w, 2.0)) * smoothstep(0.0, 0.2, behind) * exp(-behind * 1.6) * pow(n, 3.0) * (0.4 + n2);
-          vec3 e = hotC * (layer * 6.0 + shell * 2.0) + mix(hotC, vec3(1.0, 0.45, 0.6), 0.4) * wake * 2.2;
+          float aft = max(min(uA.y, uB.y) - uRad * 0.3 - p.y, 0.0);                          // downstream of the vessel (either end can lead)
+          float rho = length(p.xz - c.xz);
+          if (max(rho, sd + uRad) > uRad * 1.5 + aft * 0.5 && sd > 0.12) continue;          // outside any flame: skip the noise
+          // advected turbulence: the pattern streams downstream fast and boils as it goes
+          vec3 q = vec3(p.x, p.y + tm * 3.2, p.z) * 5.0 + uSeed;
+          vec2 w = vec2(snoise(q * 0.5), snoise(q * 0.5 + 7.1));
+          vec3 qw = q + vec3(w.x, 0.0, w.y) * 1.4;
+          float n = (snoise(qw) * 0.55 + snoise(qw * 2.1 + 3.3) * 0.3 + snoise(qw * 4.4 + 9.1) * 0.15) * 0.5 + 0.5;
+          // shock layer: thin and hottest where the surface faces the flow
+          float layer = exp(-max(sd, 0.0) / (0.025 + 0.04 * max(wind, 0.0) + 0.02 * n)) * smoothstep(-0.2, 0.9, wind);
+          // flame envelope: hugs the sides, then a widening, flickering wake behind the vessel
+          float env = uRad * (1.15 + 0.3 * n) + aft * (0.22 + 0.25 * n);
+          float sheath = smoothstep(env, env * 0.55, max(rho, sd + uRad)) * smoothstep(-0.3, 0.2, -wind + aft);
+          float tongues = pow(n, 2.2) * (1.0 + 1.5 * smoothstep(0.55, 0.9, n));
+          float wake = sheath * tongues * exp(-aft * (0.55 - 0.25 * uK));
+          float T = clamp(0.35 + 0.65 * uK - aft * 0.18 + (n - 0.5) * 0.3, 0.0, 1.0);
+          vec3 e = fire(clamp(0.75 + 0.25 * uK, 0.0, 1.0)) * layer * (3.0 + 4.0 * uK)
+                 + fire(T) * wake * (1.6 + 2.0 * uK)
+                 + vec3(0.55, 0.3, 1.0) * layer * smoothstep(0.6, 1.0, uK) * 0.8;   // ionised air glow
           col += e * dt;
         }
-        gl_FragColor = vec4(col * uK * uK * 3.0 * (0.92 + 0.08 * sin(uTime * 53.0)), 1.0);
+        float flick = 0.9 + 0.1 * sin(uTime * 41.0) * sin(uTime * 17.0 + 1.3);
+        gl_FragColor = vec4(col * uK * (0.4 + 0.6 * uK) * 3.0 * flick, 1.0);
       }`,
   });
   const mesh = new THREE.Mesh(geo, mat); mesh.visible = false; mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.userData.U = U;

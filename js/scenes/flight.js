@@ -21,6 +21,8 @@ import { IS_MOBILE } from '../render/textures.js';
 import { bakeListeners } from '../gen/baker.js';
 import { graphicsDialog } from '../ui/graphics.js';
 import { makePlasma, makeFireball } from '../render/vfx.js';
+import { LaunchFX, frostPatch } from '../render/volumetrics.js';
+import { blackbody } from '../render/glsl.js';
 
 const WARPS = [1, 2, 3, 4, 10, 50, 100, 1000, 10000, 100000, 1e6, 1e7, 1e8, 1e9, 1e10];
 const PHYS_MAX = 3; // index of the highest physics warp
@@ -85,6 +87,7 @@ export class FlightScene {
   }
   exit() {
     this.persist(); this.active = false; this.cam.enabled = false; document.querySelector('.part-menu')?.remove();
+    if (this.lfx) this.lfx.clear();
     this.root.clear(); if (this.center && this.center.parent) this.center.parent.remove(this.center);
     for (const f of this.flags || []) f.parent && f.parent.remove(f);
     this.map.show(false); this.map.clear(); clearUI();
@@ -150,6 +153,10 @@ export class FlightScene {
       this.plasma = makePlasma(); this.mesh.add(this.plasma);
     }
     this.root.add(this.mesh);
+    // cryogenic tanks are frosted while the vehicle sits fuelled on the pad in humid air
+    if (!this.lfx) this.lfx = new LaunchFX(this.G.world, this.root);
+    if (this.lfx.flakes.points.parent !== this.root) this.root.add(this.lfx.flakes.points);
+    this.lfx.attach(v, this.mesh, v.type !== 'eva' && v.situation === 'prelaunch' && v.pressureAtm() > 0.5);
     this.applyDetach();
     // pre-compile shaders so the first frames don't stall
     try { this.G.world.renderer.compileAsync(this.G.world.scene, this.G.world.camera); } catch (e) {}
@@ -488,7 +495,7 @@ export class FlightScene {
     else if (this.warpI > PHYS_MAX) this.stepRails(simDt);
     else this.stepPhysics(simDt);
     this.stepDebris(dt * warp);
-    this.render(dt);
+    this.render(dt, WARPS[this.warpI] <= WARPS[PHYS_MAX] ? warp : 0);
     if ((this.hudT += dt) > 0.1) { this.hudT = 0; this.updateHUD(); }
   }
   handleInput(dt) {
@@ -576,9 +583,65 @@ export class FlightScene {
     // settle onto the ground
     const surfV = v.v.clone().sub(v.body.surfaceVel(v.r));
     if (v.contact && surfV.len() < 0.4 && v.w.length() < 0.1 && (v.throttle === 0 || v.thrustN === 0)) { this.settle = (this.settle || 0) + simDt; if (this.settle > 1) { this.lockLanded(v, G.t); this.settle = 0; flash(`Landed on ${v.body.name}`); } } else this.settle = 0;
-    if (v.overheat > 3) { const p = v.livingParts().find(p => !p.part.heatshield); if (p) { p.broken = true; v.crashPart = p; this.crash(); } }
+    this.stepHeating(simDt);
     if (v.recalcNeeded) { v.recalcNeeded = false; }
     if (v.type === 'eva' && this.astro) this.astro.state = v.contact ? 'walk' : 'float';
+  }
+  // Re-entry heating per part. The windward end takes the full flux and parts in its lee progressively
+  // less; a heat shield leading the way (nose-on to the flow) protects everything behind it. A part that
+  // overheats burns away together with whatever hangs off it, so an unshielded vehicle comes apart
+  // piece by piece on the way down instead of exploding all at once.
+  stepHeating(dt) {
+    const v = this.vessel; if (!v || v.type === 'eva' || !v.body || !v.body.atmo || v.landed || dt <= 0) return;
+    const parts = v.livingParts(); const flux = v.heat || 0;
+    if (flux < 700 && !parts.some(p => p.heatH > 0)) return;
+    const air = v.v.clone().sub(v.body.surfaceVel(v.r)); const sp = air.len(); if (sp < 1) return;
+    const f = new THREE.Vector3(air.x, air.y, air.z).applyQuaternion(v.q.clone().invert()).divideScalar(sp); // direction of travel, vessel frame
+    const lead = (p) => { const h = p.part.h || 1, y0 = p.pl.pos[1] - h, y1 = p.pl.pos[1]; return Math.max(y0 * f.y, y1 * f.y) + p.pl.pos[0] * f.x + p.pl.pos[2] * f.z + (p.part.d || 1) * 0.5 * Math.sqrt(Math.max(0, 1 - f.y * f.y)); };
+    let sMax = -Infinity, leader = null; for (const p of parts) { const s = lead(p); p._s = s; if (s > sMax) { sMax = s; leader = p; } }
+    const shield = parts.find(p => p.part.heatshield && sMax - p._s < 0.6);
+    const shielded = shield && Math.abs(f.y) > 0.82; // the shield only works while it faces the flow
+    const L = 1.2 * (v.maxR || 1) + 0.8;
+    let lost = null;
+    for (const p of parts) {
+      let expo = Math.exp(-(sMax - p._s) / L) + 0.12 * (1 - Math.abs(f.y));
+      if (shielded && p !== shield) expo *= 0.04;
+      let cap = 2600 * (0.6 + Math.sqrt(Math.max(p.part.mass || 0.3, 0.05)));
+      if (p.part.heatshield) cap *= 30;
+      // only re-entry-class heating does damage (ascent through max-Q peaks well below this); cools slowly
+      const net = flux * expo - 700;
+      p.heatH = Math.max(0, (p.heatH || 0) + (net > 0 ? net / cap : -0.04) * dt);
+      if (p.heatH > 1 && !lost) lost = p;
+    }
+    if (!lost) return;
+    const all = v.livingParts().length;
+    const wr = this.partWorldR(lost); const oldCom = v.com.slice();
+    const group = v.breakOff(lost);
+    this.explosion(wr, v.body, Math.max(2, (lost.part.d || 1) * 0.8));
+    if (group.length >= all || !v.livingParts().length) { lost.broken = true; lost.attached = true; v.recalc(); v.crashPart = lost; this.crash(); return; }
+    this.spawnDebris(group, oldCom); this.applyDetach();
+    flash(`${lost.part.name} burned up!`);
+  }
+  // body-centred inertial position of a part's centre
+  partWorldR(p) {
+    const v = this.vessel; const h = p.part.h || 1;
+    const o = new THREE.Vector3(p.pl.pos[0] - v.com[0], p.pl.pos[1] - h / 2 - v.com[1], p.pl.pos[2] - v.com[2]).applyQuaternion(v.q);
+    const r = v.r.clone(); r.x += o.x; r.y += o.y; r.z += o.z; return r;
+  }
+  // parts glow red to white-hot as they heat up (per-part material copies, created on first need)
+  updateHullGlow() {
+    for (const m of this.mesh.userData.parts || []) {
+      const rt = m.userData.rt; const H = rt.heatH || 0;
+      if (H < 0.03 && !m.userData.hot) continue;
+      if (!m.userData.hot) {
+        m.userData.hot = [];
+        m.traverse(o => { if (!o.isMesh || !o.material || !o.material.isMeshStandardMaterial || o.userData.U) return;
+          const c = o.material.clone(); if (o.material.userData.frostU) frostPatch(c, o.material.userData.frostU);
+          o.material = c; m.userData.hot.push(c); });
+      }
+      const col = blackbody(900 + 1500 * Math.min(1, H)); const k = Math.min(1, H) ** 2 * 4 * (rt.part.heatshield ? 1.5 : 1);
+      for (const c of m.userData.hot) { c.emissive.setRGB(col[0], col[1], col[2]); c.emissiveIntensity = k; }
+    }
   }
   walk(dt) {
     const v = this.vessel, G = this.G, B = v.body; const m = this.evaMove;
@@ -733,7 +796,7 @@ export class FlightScene {
     if (r === 'revert') G.go('flight', this.launchParams); else if (r === 'vab') G.go('vab'); else G.go('center');
   }
   // ------------------------------------------------------------------ rendering
-  render(dt) {
+  render(dt, fxWarp = 1) {
     const G = this.G, v = this.vessel; if (!v) return;
     const world = G.world;
     let camPos, focusRel = new THREE.Vector3();
@@ -774,6 +837,9 @@ export class FlightScene {
       const rad = Math.min(v.maxR * 0.8, v.height * 0.3); // capsule ends sit on the hull's ends
       U.uA.value.set(0, v.bottom - v.com[1] + rad, 0).applyQuaternion(iq).divideScalar(S); U.uB.value.set(0, v.top - v.com[1] - rad, 0).applyQuaternion(iq).divideScalar(S);
       U.uRad.value = rad / S; U.uTime.value = performance.now() / 1000; } }
+    // launch smoke, tank frost / vapour, shed ice
+    if (this.lfx && v.type !== 'eva' && G.world.sunDir) this.lfx.update({ v, t: G.t, dt: dt * fxWarp, camPos, focusRel, pAtm, sunDir: G.world.sunDir });
+    if (v.type !== 'eva') this.updateHullGlow();
     // chutes: simple canopy
     this.updateChutes();
     // deployable solar arrays fold/unfold (and retract automatically in thick air)

@@ -26,6 +26,7 @@ export class World {
     r.toneMapping = THREE.NoToneMapping;
     r.shadowMap.enabled = settings.q.shadow > 0; r.shadowMap.type = THREE.PCFShadowMap;
     this.scene = new THREE.Scene();
+    this.volScene = new THREE.Scene(); // raymarched volumes drawn after the scene, against its depth (see post.js)
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 1e17);
     this.pipeline = new Pipeline(r); setFoliageAA((settings.q.msaa || 0) > 0);
     this.sky = new Sky(r); this.scene.add(this.sky.mesh);
@@ -112,7 +113,7 @@ export class World {
       const w = b.rotPeriod ? 2 * Math.PI / b.rotPeriod : 0; const q = w * w * b.radius ** 3 / (b.mu || 1);
       const f = b.name === 'Saturn' && b.sys.real ? 0.098 : b.name === 'Jupiter' && b.sys.real ? 0.065 : Math.min(0.25, 0.65 * q);
       const st = (b.style && b.style.stretch) || 0; // tidal egg: long axis (+X) faces the star
-      v.mesh.scale.set(b.radius * (1 + st), b.radius * (1 - f), b.radius * (1 - st * 0.3)); group.add(v.mesh);
+      v.mesh.scale.set(b.radius * (1 + st), b.radius * (1 - f), b.radius * (1 - st * 0.3)); group.add(v.mesh); v.oblate = f;
       v.spin = new THREE.Group(); group.add(v.spin);
     } else {
       v.terrain = new Terrain(b, this);
@@ -215,7 +216,7 @@ export class World {
           }
         }
         if (b.atmo && (d < b.radius + b.atmo.height * 60 + b.radius * 4 || pix > 6)) {
-          atmos.push({ d, body: b, C: [rel.x, rel.y, rel.z], R: b.radius + (b.isGas ? 0 : 0), atmo: b.atmo, w2b, cloudRot: this.cloudRot(b), clouds: this.cloudsFor(b), real2D: b.name === 'Earth' && b.sys.real ? planetTexture(PLANET_EXTRA.Earth.clouds, false) : null });
+          atmos.push({ d, body: b, C: [rel.x, rel.y, rel.z], R: b.radius + (b.isGas ? 0 : 0), atmo: b.atmo, w2b, oblate: v.oblate || 0, pole: new THREE.Vector3(b.poleAxis.x, b.poleAxis.y, b.poleAxis.z), cloudRot: this.cloudRot(b), clouds: this.cloudsFor(b), real2D: b.name === 'Earth' && b.sys.real ? planetTexture(PLANET_EXTRA.Earth.clouds, false) : null });
         }
       } else if (v) {
         v.group.visible = false;
@@ -271,7 +272,7 @@ export class World {
     if (atmos.length) { const a = atmos[0]; const alt = a.d - a.R; if (alt < a.atmo.height) { const up = new THREE.Vector3(-a.C[0], -a.C[1], -a.C[2]).normalize(); const elev = up.dot(sunDir); const thick = Math.min(1, a.atmo.P0 / 50) * (1 - alt / a.atmo.height); starK = 1 - thick * Math.min(1, Math.max(0, (elev + 0.12) / 0.2)); } }
     this.sky.U.uBright.value = (frame.skyBright ?? 1) * starK; this.points.points.visible = starK > 0.3;
     const sunZ = -sunScreen.z * starDist, sunAng = sys.star.radius / starDist / Math.tan(cam.fov * Math.PI / 360) * 1.2;
-    this.pipeline.render(this.scene, cam, { time: this.t % 10000, sunDir, sunColor, atmos, exposure: (frame.exposure ?? 1) * autoExp * this.exposureBias, sunUV, sunVis, sunZ, sunAng });
+    this.pipeline.render(this.scene, cam, { time: this.t % 10000, sunDir, sunColor, atmos, exposure: (frame.exposure ?? 1) * autoExp * this.exposureBias, vol: this.volScene, sunUV, sunVis, sunZ, sunAng });
     this.sunDir = sunDir; this.flux = flux;
   }
   cloudRot(b) { const cl = this.cloudsFor(b); if (!cl) return 0; return (this.t * (cl.speed || 10) / b.radius) % (Math.PI * 2); }

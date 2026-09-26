@@ -22,7 +22,7 @@ export function makeGasMaterial(body, gg) {
     uTime: { value: 0 }, uSun: { value: new THREE.Vector3(1, 0, 0) }, uWorldToBody: { value: new THREE.Matrix3() }, uEmissive: { value: new THREE.Vector3(...(st.emissive || [0, 0, 0])) },
     uRingIn: { value: st.rings ? ringData(body).inner : 0 }, uRingOut: { value: st.rings ? ringData(body).outer : 0 }, uRingTex: { value: st.rings ? ringData(body).tex : dummy },
     uHasRingTex: { value: st.rings ? 1 : 0 }, uCenter: { value: new THREE.Vector3() }, uRadius: { value: body.radius }, uPole: { value: new THREE.Vector3(0, 1, 0) },
-    uSunColor: { value: new THREE.Vector3(1, 1, 1) }, uFlowGain: { value: real ? 0.02 : 0.035 },
+    uSunColor: { value: new THREE.Vector3(1, 1, 1) }, uFlowGain: { value: real ? 0.006 : 0.009 },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms: U,
@@ -39,12 +39,15 @@ export function makeGasMaterial(body, gg) {
       varying vec3 vN; varying vec3 vW;
       vec2 dUVdt(vec2 uv){ // flow map (east,north) -> uv velocity
         vec2 f = texture(uFlow, uv).rg; float lat = (uv.y - 0.5) * PI;
-        return vec2(-f.x / (6.2831853 * max(cos(lat), 0.12)), f.y / PI);
+        return vec2(-f.x / (6.2831853 * max(cos(lat), 0.35)), f.y / PI);
       }
       vec3 deck(vec2 uv, vec2 gx, vec2 gy, float t){
         if (uHasFlow < 0.5) return textureGrad(uTex, uv, gx, gy).rgb;
-        vec2 v = dUVdt(uv) * uFlowGain;
-        float T = 6.0; float p1 = fract(t / T), p2 = fract(t / T + 0.5);
+        // gentle drift only: large advection offsets smear the bake (worst toward the poles, where a
+        // small east wind is a big step in longitude)
+        float lat = (uv.y - 0.5) * PI;
+        vec2 v = dUVdt(uv) * uFlowGain * smoothstep(1.45, 1.1, abs(lat));
+        float T = 10.0; float p1 = fract(t / T), p2 = fract(t / T + 0.5);
         vec3 c1 = textureGrad(uTex, uv - v * p1 * T, gx, gy).rgb;
         vec3 c2 = textureGrad(uTex, uv - v * p2 * T, gx, gy).rgb;
         return mix(c1, c2, abs(p1 * 2.0 - 1.0));
@@ -58,8 +61,9 @@ export function makeGasMaterial(body, gg) {
         // three cloud decks sampled along the view ray (parallax) -> volumetric depth
         vec3 dB = uWorldToBody * V;
         vec3 col = vec3(0.0); float acc = 0.0;
+        float muV = max(dot(n, V), 0.0);
         for (int k = 0; k < 3; k++) {
-          float hgt = float(k) * 0.0022;
+          float hgt = float(k) * 0.0012 * smoothstep(0.1, 0.5, muV); // no parallax at the limb (it smeared the edge)
           vec2 uvk = eqUV(normalize(d - dB * hgt));
           vec3 c = uHasAlbedo > 0.5 ? deck(uvk, gx, gy, uTime + float(k) * 2.1) : uBandTint;
           float lumK = dot(c, vec3(0.3, 0.5, 0.2));
@@ -71,7 +75,8 @@ export function makeGasMaterial(body, gg) {
         vec3 Lb = uWorldToBody * L;
         vec2 uvs = eqUV(normalize(d + (Lb - d * dot(Lb, d)) * 0.004));
         float hC = dot(col, vec3(0.3, 0.5, 0.2)), hS = uHasAlbedo > 0.5 ? dot(deck(uvs, gx, gy, uTime), vec3(0.3, 0.5, 0.2)) : hC;
-        float shade = clamp(1.0 + (hC - hS) * 2.5, 0.6, 1.15);
+        // (kept subtle: a strong term embossed the bands like rocky relief)
+        float shade = clamp(1.0 + (hC - hS) * 0.6, 0.9, 1.05);
         float NdL = dot(n, L); float mu = max(dot(n, V), 0.0);
         float diff = pow(max(NdL, 0.0), 0.95) * pow(mu, 0.28) + smoothstep(-0.12, 0.0, NdL) * 0.02; // Minnaert-style limb
         float ringSh = 1.0;
