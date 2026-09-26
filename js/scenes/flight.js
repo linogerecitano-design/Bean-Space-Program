@@ -21,7 +21,7 @@ import { loadSystem } from '../core/universe.js';
 import { IS_MOBILE } from '../render/textures.js';
 import { bakeListeners } from '../gen/baker.js';
 import { graphicsDialog } from '../ui/graphics.js';
-import { makePlasma, makeFireball } from '../render/vfx.js';
+import { makeShapePlasma, makeFireball } from '../render/vfx.js';
 import { LaunchFX, frostPatch } from '../render/volumetrics.js';
 import { blackbody } from '../render/glsl.js';
 
@@ -187,12 +187,12 @@ export class FlightScene {
     if (this.mesh) this.root.remove(this.mesh);
     if (v.type === 'eva') {
       if (!this.astro) this.astro = new Astronaut({});
-      this.mesh = new THREE.Group(); this.mesh.add(this.astro.group); this.astro.group.position.set(0, -0.92, 0);
+      this.mesh = new THREE.Group(); this.mesh.add(this.astro.group); this.astro.group.position.set(0, -0.92, 0); this.plasma = null;
       this.astro.setSuit(v.suited !== false);
     } else {
       this.mesh = buildVesselMesh(v.placed, { plumes: true });
       this.mesh.userData.parts.forEach((m, i) => { m.userData.rt = v.parts[i]; });
-      this.plasma = makePlasma(); this.mesh.add(this.plasma);
+      this.plasma = makeShapePlasma(this.mesh);
     }
     this.root.add(this.mesh);
     // cryogenic tanks are frosted while the vehicle sits fuelled on the pad in humid air
@@ -677,6 +677,22 @@ export class FlightScene {
   // less; a heat shield leading the way (nose-on to the flow) protects everything behind it. A part that
   // overheats burns away together with whatever hangs off it, so an unshielded vehicle comes apart
   // piece by piece on the way down instead of exploding all at once.
+  // how exposed each part is to the flow (1 = leading surface), for the re-entry glow: the same model as
+  // the heating (depth behind the leading face, heat shields shadowing the parts behind them)
+  plasmaExposure(v, fW) {
+    const out = new Map(); const parts = v.livingParts(); if (!parts.length) return out;
+    const f = fW.clone().applyQuaternion(v.q.clone().invert());
+    const lead = (p) => { const h = p.part.h || 1, y0 = p.pl.pos[1] - h, y1 = p.pl.pos[1]; return Math.max(y0 * f.y, y1 * f.y) + p.pl.pos[0] * f.x + p.pl.pos[2] * f.z + (p.part.d || 1) * 0.5 * Math.sqrt(Math.max(0, 1 - f.y * f.y)); };
+    let sMax = -Infinity; for (const p of parts) { p._ps = lead(p); sMax = Math.max(sMax, p._ps); }
+    const shield = parts.find(p => p.part.heatshield && sMax - p._ps < 0.6); const shielded = shield && f.y < -0.82;
+    const L = 1.2 * (v.maxR || 1) + 0.8;
+    for (const p of parts) {
+      let e = Math.exp(-(sMax - p._ps) / L) + 0.12 * (1 - Math.abs(f.y));
+      if (shielded && p !== shield) e *= 0.3; // in the shield's wake: only the sheath and wake glow reach it
+      out.set(p, Math.min(1.3, e * (1 + Math.min(1, p.heatH || 0) * 0.5)));
+    }
+    return out;
+  }
   stepHeating(dt) {
     const v = this.vessel; if (!v || v.type === 'eva' || !v.body || !v.body.atmo || v.landed || dt <= 0) return;
     const parts = v.livingParts(); const flux = v.heat || 0;
@@ -916,13 +932,15 @@ export class FlightScene {
       const rt = m.userData.rt; if (!m.userData.plumes) continue;
       for (const pl of m.userData.plumes) { pl.visible = !!rt.firing && rt.attached; const U2 = pl.userData.U; U2.uThrottle.value = rt.firing || 0; U2.uPressure.value = pAtm; U2.uTime.value = performance.now() / 1000; }
     }
-    if (this.plasma) { const k = Math.min(1, (v.heat || 0) / 600); this.plasma.visible = k > 0.02; if (this.plasma.visible) { this.plasma.material.uniforms.uK.value = k; const air = v.v.clone().sub(v.body.surfaceVel(v.r)).norm(); const loc = new THREE.Vector3(air.x, air.y, air.z).applyQuaternion(v.q.clone().invert()); this.plasma.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), loc.negate());
-      const S = Math.max(v.maxR * 2.5, v.height * 1.2); this.plasma.scale.setScalar(S);
-      // the vessel as a capsule in the plasma's frame, so the glow wraps it and is hidden behind it
-      const iq = this.plasma.quaternion.clone().invert(); const U = this.plasma.material.uniforms;
-      const rad = Math.min(v.maxR * 0.8, v.height * 0.3); // capsule ends sit on the hull's ends
-      U.uA.value.set(0, v.bottom - v.com[1] + rad, 0).applyQuaternion(iq).divideScalar(S); U.uB.value.set(0, v.top - v.com[1] - rad, 0).applyQuaternion(iq).divideScalar(S);
-      U.uRad.value = rad / S; U.uTime.value = performance.now() / 1000; } }
+    if (this.plasma) {
+      const k = Math.min(1, (v.heat || 0) / 600);
+      if (k > 0.02 && v.body) {
+        const air = v.v.clone().sub(v.body.surfaceVel(v.r)); const sp = air.len() || 1;
+        const fW = new THREE.Vector3(air.x / sp, air.y / sp, air.z / sp);
+        const ex = this.plasmaExposure(v, fW);
+        this.plasma.update(fW, k, performance.now() / 1000, (m) => ex.get(m.userData.rt) || 0);
+      } else this.plasma.hide();
+    }
     // launch smoke, tank frost / vapour, shed ice
     if (this.lfx && v.type !== 'eva' && G.world.sunDir) this.lfx.update({ v, t: G.t, dt: dt * fxWarp, camPos, focusRel, pAtm, sunDir: G.world.sunDir });
     if (v.type !== 'eva') this.updateHullGlow();

@@ -219,3 +219,93 @@ export function makeFireball(seed = Math.random() * 100) {
   mesh.onBeforeRender = ((prev) => (r, s, cam, g, mt, gr) => { prev(r, s, cam, g, mt, gr); const c = U.uCamLocal.value; const inside = Math.max(Math.abs(c.x), Math.abs(c.y), Math.abs(c.z)) < 1; mat.side = inside ? THREE.BackSide : THREE.FrontSide; mat.depthTest = !inside; })(mesh.onBeforeRender);
   return mesh;
 }
+
+// ---------------------------------------------------------------- re-entry plasma that follows the vessel's shape
+// Every part mesh gets a twin drawn with this shader: the surfaces facing the airflow stand off into a thin,
+// white-hot shock layer, and the rear of each part is stretched downstream into a flickering wake, so the
+// glow takes the real outline of capsules, tanks, fins and heat shields. Brightness is set per part (how
+// exposed it is to the flow), so a capsule's shield blazes while the parts in its lee only glimmer.
+const SHAPE_VERT = `#include <common>
+  #include <logdepthbuf_pars_vertex>
+  ${NOISE3}
+  uniform vec3 uFwd, uC; uniform float uK, uPK, uR, uTime;
+  varying float vA, vBack, vN; varying vec3 vW, vNrm;
+  void main(){
+    vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz; vec3 wn = normalize(mat3(modelMatrix) * normal);
+    float a = dot(wn, uFwd);                                            // +1: faces into the airflow
+    float s = clamp(dot(uC - wp, uFwd) / max(uR, 0.05), -1.0, 1.0);     // +1 at the part's downstream end
+    float back = smoothstep(-0.35, 1.0, s);
+    float k = uK * clamp(uPK, 0.0, 1.3);
+    float n = snoise(wp * (1.6 / max(uR, 0.3)) + uFwd * mod(uTime, 200.0) * 3.0) * 0.5 + 0.5;
+    vec3 off = wn * uR * (0.05 + 0.16 * max(a, 0.0)) * (0.4 + k);          // shock stand-off in front
+    off += wn * uR * 0.28 * back * back * k;                               // the sheath widens behind
+    off -= uFwd * uR * (1.0 + 3.2 * k) * pow(back, 1.6) * (0.55 + 0.6 * n); // wake streaming from the silhouette
+    wp += off * step(0.001, k);
+    vA = a; vBack = back; vN = n; vW = wp; vNrm = wn;
+    gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+    #include <logdepthbuf_vertex>
+  }`;
+const SHAPE_FRAG = `#include <common>
+  #include <logdepthbuf_pars_fragment>
+  ${NOISE3}
+  uniform vec3 uFwd; uniform float uK, uPK, uR, uTime;
+  varying float vA, vBack, vN; varying vec3 vW, vNrm;
+  vec3 fire(float T){
+    vec3 c = mix(vec3(0.35, 0.03, 0.005), vec3(1.0, 0.28, 0.04), smoothstep(0.0, 0.35, T));
+    c = mix(c, vec3(1.0, 0.62, 0.18), smoothstep(0.3, 0.65, T));
+    return mix(c, vec3(1.0, 0.93, 0.8), smoothstep(0.65, 1.0, T));
+  }
+  void main(){
+    #include <logdepthbuf_fragment>
+    float k = uK * clamp(uPK, 0.0, 1.3); if (k < 0.01) discard;
+    vec3 V = normalize(cameraPosition - vW); float fres = 1.0 - abs(dot(V, normalize(vNrm)));
+    float tm = mod(uTime, 200.0);
+    float n = snoise(vW * (2.2 / max(uR, 0.3)) + uFwd * tm * 6.0) * 0.5 + 0.5;
+    float n2 = snoise(vW * (5.0 / max(uR, 0.3)) + uFwd * tm * 9.0 + 3.1) * 0.5 + 0.5;
+    float front = smoothstep(0.05, 0.85, vA) * (1.0 - vBack);
+    float wake = vBack * pow(n * 0.7 + n2 * 0.3, 1.6) * (1.0 - smoothstep(0.75, 1.0, vBack) * 0.6);
+    float sheath = (0.25 + 0.75 * fres) * (1.0 - vBack) * 0.45 * (0.6 + 0.8 * n);
+    float T = clamp(0.3 + 0.5 * k + 0.35 * front - 0.45 * vBack + (n - 0.5) * 0.3, 0.0, 1.0);
+    vec3 col = fire(T) * (front * 1.15 + sheath + wake * 1.4)
+             + vec3(0.55, 0.32, 1.0) * front * smoothstep(0.6, 1.0, k) * 0.6; // ionised air
+    float flick = 0.85 + 0.15 * sin(uTime * 41.0 + vN * 6.0);
+    gl_FragColor = vec4(col * k * (0.4 + 0.55 * k) * flick, 1.0);
+  }`;
+export function makeShapePlasma(vesselGroup) {
+  const S = { uK: { value: 0 }, uTime: { value: 0 }, uFwd: { value: new THREE.Vector3(0, 1, 0) } };
+  const entries = [];
+  const inv = new THREE.Matrix4(), rel = new THREE.Matrix4(), box = new THREE.Box3(), tmp = new THREE.Box3();
+  vesselGroup.updateWorldMatrix(true, true);
+  for (const m of vesselGroup.userData.parts || []) {
+    // part bounds in the part group's frame (plumes excluded)
+    inv.copy(m.matrixWorld).invert(); box.makeEmpty();
+    const meshes = [];
+    m.traverse(o => { if (!o.isMesh || !o.geometry || !o.geometry.attributes.normal || o.userData.plasmaTwin) return;
+      let p = o; while (p && p !== m) { if (p.userData && p.userData.U) return; p = p.parent; } // skip plumes
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      tmp.copy(o.geometry.boundingBox).applyMatrix4(rel.multiplyMatrices(inv, o.matrixWorld)); box.union(tmp); meshes.push(o); });
+    if (!meshes.length || box.isEmpty()) continue;
+    const U = { ...S, uC: { value: new THREE.Vector3() }, uR: { value: 1 }, uPK: { value: 0 } };
+    const mat = new THREE.ShaderMaterial({ uniforms: U, vertexShader: SHAPE_VERT, fragmentShader: SHAPE_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const twins = meshes.map(o => { const t = new THREE.Mesh(o.geometry, mat); t.userData.plasmaTwin = true; t.frustumCulled = false; t.castShadow = t.receiveShadow = false; t.raycast = () => {}; t.renderOrder = 5; t.visible = false; o.add(t); return t; });
+    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+    entries.push({ m, U, twins, cLocal: c, r: Math.max(0.15, size.length() / 2) });
+  }
+  const _c = new THREE.Vector3(), _s = new THREE.Vector3();
+  return {
+    entries,
+    // fwdWorld: unit direction of travel through the air; k: overall heating 0..1; partK(m): per-part exposure
+    update(fwdWorld, k, time, partK) {
+      S.uK.value = k; S.uTime.value = time; S.uFwd.value.copy(fwdWorld);
+      for (const e of entries) {
+        const pk = k > 0.02 && e.m.visible !== false ? partK(e.m) : 0;
+        const on = pk > 0.01; for (const t of e.twins) t.visible = on;
+        if (!on) continue;
+        e.U.uPK.value = pk; e.m.updateWorldMatrix(true, false);
+        e.U.uC.value.copy(_c.copy(e.cLocal).applyMatrix4(e.m.matrixWorld));
+        e.m.matrixWorld.decompose(_c.set(0, 0, 0), new THREE.Quaternion(), _s); e.U.uR.value = e.r * Math.max(_s.x, _s.y, _s.z);
+      }
+    },
+    hide() { for (const e of entries) for (const t of e.twins) t.visible = false; },
+  };
+}
