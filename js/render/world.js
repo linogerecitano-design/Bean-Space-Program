@@ -7,6 +7,7 @@ import { Pipeline } from './post.js';
 import { Sky } from './sky.js';
 import { Scatter, scatterTime, setFoliageAA } from './scatter.js';
 import { planetTexture, PLANET_EXTRA, PLANET_MAPS, IS_MOBILE, getGroundArrays } from './textures.js';
+import { Bolts } from './lightning.js';
 import { blackbody } from './glsl.js';
 import { requestBake, prefetchSystem, bakeListeners } from '../gen/baker.js';
 import { GasGiantBaker } from '../gen/gasgiant.js';
@@ -272,14 +273,27 @@ export class World {
     if (atmos.length) { const a = atmos[0]; const alt = a.d - a.R; if (alt < a.atmo.height) { const up = new THREE.Vector3(-a.C[0], -a.C[1], -a.C[2]).normalize(); const elev = up.dot(sunDir); const thick = Math.min(1, a.atmo.P0 / 50) * (1 - alt / a.atmo.height); starK = 1 - thick * Math.min(1, Math.max(0, (elev + 0.12) / 0.2)); } }
     this.sky.U.uBright.value = (frame.skyBright ?? 1) * starK; this.points.points.visible = starK > 0.3;
     const sunZ = -sunScreen.z * starDist, sunAng = sys.star.radius / starDist / Math.tan(cam.fov * Math.PI / 360) * 1.2;
-    this.pipeline.render(this.scene, cam, { time: this.t % 10000, sunDir, sunColor, atmos, exposure: (frame.exposure ?? 1) * autoExp * this.exposureBias, vol: this.volScene, sunUV, sunVis, sunZ, sunAng });
+    // lightning bolts in the nearest gas giant's cloud deck
+    { if (!this.bolts) this.bolts = new Bolts(this.scene);
+      const a = atmos.find(x => x.clouds && x.clouds.stack === 4); let g = null;
+      if (a) { const cl = a.clouds; const Rb = a.R + cl.height; const alt = a.d - Rb - cl.thickness * 0.5;
+        if (alt < cl.thickness * 12) g = { C: new THREE.Vector3(...a.C), b2w: a.w2b.clone().transpose(), Rb, thick: cl.thickness, alt: Math.max(alt, 0) }; }
+      const now = performance.now() / 1000; const bdt = Math.min(0.2, now - (this._boltT || now)); this._boltT = now;
+      const sz = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      this.bolts.update(now, bdt, g, cam.getWorldDirection(new THREE.Vector3()), Math.tan(cam.fov * Math.PI / 360), sz.y); }
+    this.pipeline.render(this.scene, cam, { bolt: this.bolts.flash, time: this.t % 10000, sunDir, sunColor, atmos, exposure: (frame.exposure ?? 1) * autoExp * this.exposureBias, vol: this.volScene, sunUV, sunVis, sunZ, sunAng });
     this.sunDir = sunDir; this.flux = flux;
   }
   cloudRot(b) { const cl = this.cloudsFor(b); if (!cl) return 0; return (this.t * (cl.speed || 10) / b.radius) % (Math.PI * 2); }
   cloudsFor(b) {
     const st = b.style;
     if (b.isGas) { // gas giants: a 3D deck of convective cloud towers over the banded deck, tinted by the bands
-      if (!b._clouds) b._clouds = { coverage: 0.5, color: (st && st.bands && st.bands[0]) || [0.85, 0.75, 0.6], height: 0, thickness: 140000 * Math.min(1.5, Math.max(0.5, b.radius / 7e7)), opaque: false, speed: 0, stack: 4 };
+      if (!b._clouds) {
+        const thickness = 140000 * Math.min(1.5, Math.max(0.5, b.radius / 7e7));
+        // the deck sits where the real ammonia/water cloud tops do: around 0.7 bar in this planet's own atmosphere
+        const a = b.atmo; const h07 = a && a.P0 > 70 ? a.H * Math.log(a.P0 / 70) : 0;
+        b._clouds = { coverage: 0.5, color: (st && st.bands && st.bands[0]) || [0.85, 0.75, 0.6], height: Math.max(0, h07 - thickness * 0.35), thickness, opaque: false, speed: 0, stack: 4 };
+      }
       if (!b._clouds.map) { const v = this.visuals.get(b); b._clouds.map = b.sys.real && PLANET_MAPS[b.name] ? planetTexture(PLANET_MAPS[b.name]) : (v && v.gg && v.gg.ready && v.gg.albedo) || null; }
       if (!b._clouds.spots) { // the bake's vortices, in the body frame the cloud shader samples (eqUV: u = 0.5 - lon/2π)
         const v = this.visuals.get(b); const P = v && v.gg && v.gg.P;

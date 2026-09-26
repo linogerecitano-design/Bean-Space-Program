@@ -113,7 +113,7 @@ export class Pipeline {
     };
     this.cloudMat = new THREE.ShaderMaterial({
       uniforms: { ...this.common, uNoise: { value: this.noise3 }, uNoiseS: { value: this.noise3.userData.size }, uCloudMap: { value: null }, uCloudMap1: { value: null }, uCloudReal: { value: null }, uPixAng: { value: 0.002 }, uHasMap: { value: 0 }, uSteps: { value: settings.q.cloudSteps }, uFrame: { value: 0 }, uFar3D: { value: settings.q.clouds3d }, uDbg: { value: 0 },
-        uSpot: { value: Array.from({ length: 6 }, () => new THREE.Vector4()) }, uSpotS: { value: Array.from({ length: 6 }, () => new THREE.Vector4()) }, uNumSpot: { value: 0 }, uClock: { value: 0 } },
+        uSpot: { value: Array.from({ length: 6 }, () => new THREE.Vector4()) }, uSpotS: { value: Array.from({ length: 6 }, () => new THREE.Vector4()) }, uNumSpot: { value: 0 }, uClock: { value: 0 }, uBolt: { value: new THREE.Vector4() }, uBoltR: { value: 1 } },
       vertexShader: FSQ_V,
       fragmentShader: `precision highp sampler3D;
         ${ATMO_COMMON}
@@ -131,9 +131,12 @@ export class Pipeline {
           return vec4(smoothstep(1.0 - A.coverage - 0.15, 1.0 - A.coverage + 0.25, n), 0.0, 0.0, 0.2);
         }
         // gas-giant storms (body frame): centre + angular radius, and (aspect, spin); real time for lightning
-        uniform vec4 uSpot[6]; uniform vec4 uSpotS[6]; uniform int uNumSpot; uniform float uClock, uDbg;
+        uniform vec4 uSpot[6]; uniform vec4 uSpotS[6]; uniform int uNumSpot; uniform float uClock, uDbg; uniform vec4 uBolt; uniform float uBoltR;
         float gStorm; // set by density(): how convective the sampled cloud is (drives lightning)
         float gCore;  // set by density(): 1 inside a gas-giant vortex (keeps the storm's own colour)
+        bool gCoarse = false; // shadow rays: gas decks sample only the big billow shapes
+        float gAO = 1.0;      // gas decks: 0 deep in the crevices between billows, 1 on their tops
+        float gField = 0.0;   // gas decks: the continuous billow field (>0 inside), for surface normals
         // twist a direction around the storms' vortices, so the clouds spiral with them; core: 1 inside a storm
         vec3 swirl(vec3 d, out float core) {
           core = 0.0;
@@ -154,15 +157,15 @@ export class Pipeline {
         float hash31(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
         // lightning: storm cells flash now and then (a main stroke, sometimes a restrike), lighting the cloud from inside
         vec3 lightningAt(Atmo A, vec3 q, float hf) {
-          float cs = A.stack > 3.5 ? (A.Rt - A.Rb) * 3.0 : 25000.0;
+          float cs = A.stack > 3.5 ? (A.Rt - A.Rb) * 1.2 : 25000.0;
           vec3 g = q / cs; vec3 id = floor(g); vec3 f = fract(g) - 0.5;
           float h = hash31(id), h2 = hash31(id + 17.3);
-          if (h2 > (A.stack > 3.5 ? 0.6 : 0.45)) return vec3(0.0); // only some storm cells are active
+          if (h2 > (A.stack > 3.5 ? 0.3 : 0.45)) return vec3(0.0); // only some storm cells are active
           float per = 1.2 + h * 3.5; float ph = fract(uClock / per + h * 7.1) * per; // seconds into this cell's cycle
           float e = exp(-ph * 6.0) * (0.65 + 0.35 * sin(ph * 160.0)) + (h2 < 0.3 ? 0.9 * exp(-abs(ph - 0.22) * 18.0) : 0.0); // stroke + restrike
           if (uDbg > 0.5) e = 1.0;
           vec3 cen = (vec3(hash31(id + 3.1), hash31(id + 5.7), hash31(id + 9.2)) - 0.5) * 0.6;
-          vec3 df = f - cen; float sp = exp(-dot(df, df) * 9.0) * (1.0 - hf * 0.4);
+          vec3 df = f - cen; float sp = exp(-dot(df, df) * (A.stack > 3.5 ? 30.0 : 9.0)) * (1.0 - hf * 0.4); // fades to nothing before the cell edge
           return vec3(0.72, 0.8, 1.0) * e * sp;
         }
         // the band colour under a gas giant's cloud (its albedo map, or the base band tint before it is baked)
@@ -201,23 +204,32 @@ export class Pipeline {
             float cirrus = clamp(L.b * profC * (fib * 1.4 - 0.3), 0.0, 1.0) * 0.18;
             return max(base, max(anvil, cirrus));
           }
-          if (A.stack > 3.5) { // gas giant: rounded convective cloud heads and thunderhead towers over the band deck
+          if (A.stack > 3.5) { // gas giant: a continuous sea of billowing cloud with towers over the storms
             float lum = dot(gasBand(A, d, lod), vec3(0.3, 0.5, 0.2));
-            float cov = clamp(A.coverage + (lum - 0.5) * 1.6, 0.15, 0.92);      // bright zones: thick ammonia decks
-            float core; vec3 dS = swirl(d, core); // clouds wrap around the Great Red Spot and other big storms
-            // storm-scale structure, wound up by the twist into spiral bands (inside a vortex only)
-            float arms = nz(dS * A.Rb / (thick * 25.0), thick * 25.0).r * 0.7 + nz(dS * A.Rb / (thick * 9.0), thick * 9.0).g * 0.3;
-            cov = mix(cov, 0.2 + 1.1 * smoothstep(0.35, 0.7, arms), core * 0.85); gCore = core;
-            float scale = thick * 1.8; vec3 qs = dS * A.Rb; vec3 gw = wind * 25.0; q = dS * r;
-            float shape = nz((qs + gw) / scale, scale).r * 0.7 + nz((qs + gw) / (scale * 0.45), scale * 0.45).g * 0.3;
-            float m = clamp((shape - (1.0 - cov) * 0.85) / max(1.0 - (1.0 - cov) * 0.85, 0.05), 0.0, 1.0);
-            float storm = smoothstep(0.55, 0.78, nz(qs / (scale * 8.0), scale * 8.0).b); // scattered towering storms
-            gStorm = (0.3 + 0.7 * storm) * (1.0 - core);                        // lightning lives in the convective belts, most in the towers
-            float eyewall = core * (1.0 - core) * 4.0; storm = max(storm, core * 0.55 + eyewall * 0.35); // raised vortex deck
-            float top = (0.22 + 0.72 * storm) * sqrt(m);                          // sqrt: domed, cauliflower tops
-            float prof = smoothstep(0.0, 0.04, hf) * (1.0 - smoothstep(top - 0.07, top + 0.01, hf));
-            float det = nz((q + gw * 1.3) / (scale * 0.12), scale * 0.12).g * 0.6 + nz((q + gw) / (scale * 0.045), scale * 0.045).r * 0.4;
-            return clamp(prof * 1.7 - (1.0 - det) * (0.3 + 0.45 * hf), 0.0, 1.0); // billowy edges, wispier higher up
+            float core; vec3 dS = swirl(d, core); gCore = core;      // the sea wraps around the big vortices
+            vec3 qs = dS * A.Rb; vec3 gw = wind * 25.0; q = dS * r;
+            // local deck level (in deck heights): rolling swells, brighter zones higher, towers over storms
+            float swell = nz((qs + gw) / (thick * 3.5), thick * 3.5).r;
+            float sc = nz((qs + gw) / (thick * 2.6), thick * 2.6).b; float storm = smoothstep(0.52, 0.85, sc); storm = sqrt(storm) * storm; // convective towers: domed, a few hundred km across
+            float arms = nz(qs / (thick * 25.0), thick * 25.0).r * 0.7 + nz(qs / (thick * 9.0), thick * 9.0).g * 0.3; // wound into spirals in a vortex
+            gStorm = (0.3 + 0.7 * storm) * (1.0 - core);
+            float base = 0.1 + 0.2 * swell + (lum - 0.5) * 0.2 + storm * 0.3 + core * (0.06 + 0.2 * smoothstep(0.35, 0.7, arms));
+            // billows: a 3D noise volume thresholded against height, so the tops are rounded, overhanging cauliflower
+            // heads rather than peaks (below the deck level it is solid, above it only the strongest lobes rise)
+            float n1 = nz((q + gw) / (thick * 0.55), thick * 0.55).r * 0.7 + nz((q + gw) / (thick * 1.4), thick * 1.4).g * 0.3;
+            float n2 = nz((q + gw * 1.3) / (thick * 0.18), thick * 0.18).g;
+            float n3 = nz((q + gw * 1.6) / (thick * 0.05), thick * 0.05).r;
+            float fp = max(dCam * uPixAng, 1.0);                                   // pixel footprint: no detail finer than ~3 px
+            float k2 = smoothstep(1.5, 4.0, thick * 0.14 / fp), k3 = smoothstep(1.5, 4.0, thick * 0.05 / fp);
+            if (gCoarse) { k2 = 0.0; k3 = 0.0; }
+            float nb = n1 * 0.76 + mix(0.5, n2, k2) * 0.18 + mix(0.5, n3, k3) * 0.06;
+            float top = base + 0.3 * (1.0 + storm);                                     // how far the heads can rise
+            float dens = nb - 0.45 + (base - hf) * 0.9;
+            gAO = clamp((hf - base + 0.1) / (top - base + 0.1), 0.0, 1.0); gField = dens - max(hf - top, 0.0) * 3.0;
+            float deck = smoothstep(0.0, 0.06, dens) * smoothstep(0.0, 0.015, hf) * (1.0 - smoothstep(top, top + 0.06, hf)); // crisp surfaces: billows read as solid heads
+            // a thin haze veil above the tops
+            float veil = 0.02 * exp(-max(hf - top, 0.0) * 5.0) * (0.4 + nz(qs / (thick * 2.0) + gw / thick, thick * 2.0).g);
+            return clamp(max(deck, veil), 0.0, 1.0);
           }
           if (A.stack > 1.5 && A.stack < 2.5) { // Venus: mottled lower deck under an unbroken upper deck
             float lower = L.r * (1.0 - smoothstep(0.35, 0.5, hf)) * (0.7 + 0.3 * nz(q / 60000.0 + uTime * 0.002, 60000.0).r);
@@ -320,39 +332,74 @@ export class Pipeline {
             if (farW < 0.999) {
               // march at most a few deck thicknesses, with steps packed near the camera; the rest of a
               // long grazing ray is handed to the 2D layer (a coarse march there only slices the noise)
-              float L = min(t1 - t0, thick * 20.0); int N = uSteps;
+              float L = min(t1 - t0, thick * (A.stack > 3.5 ? 7.0 : 20.0)); int N = uSteps; // gas decks: dense steps where the billows are
               float jitter = ign(gl_FragCoord.xy);
               float cosT = dot(rd, uSunDir);
               float phase = mix(hg(cosT, 0.65), hg(cosT, -0.25), 0.3) * 4.0 + 0.4;
               vec3 amb = (A.betaR / max(max(A.betaR.x, A.betaR.y), max(A.betaR.z, 1e-9))) * 0.06 + 0.1;
               float sigma = (A.opaque > 0.5 ? 0.00025 : 0.0022) * (A.opaque > 0.5 ? 1.0 : 30000.0 / max(thick, 1000.0));
-              for (int i = 0; i < 64; i++) {
-                if (i >= N || T3 < 0.02) break;
-                float u0 = (float(i) + jitter) / float(N), u1 = (float(i) + 1.0 + jitter) / float(N);
-                float t = t0 + L * u0 * u0; float dt = L * (u1 * u1 - u0 * u0);
+              if (A.stack > 3.5) sigma = 0.0012; // gas-giant deck: dense billows that read as a surface
+              // gas decks: coarse steps down to the cloud surface, then back up and march the top finely
+              // (the billows are far smaller than an even split of a 1000 km grazing ray)
+              bool gas = A.stack > 3.5; bool fine = false; int fineN = 0; bool haveN = false; vec3 gN = normalize(rd * t0 - A.C);
+              float tg = t0 + thick * 0.05 * jitter, dtg = thick * 0.05;
+              for (int i = 0; i < 160; i++) {
+                if (T3 < 0.02) break;
+                float t, dt;
+                if (gas) { if (i >= N * 5 || tg > t0 + L) break; t = tg; dt = dtg; }
+                else {
+                  if (i >= N) break;
+                  float u0 = (float(i) + jitter) / float(N), u1 = (float(i) + 1.0 + jitter) / float(N);
+                  t = t0 + L * u0 * u0; dt = L * (u1 * u1 - u0 * u0);
+                }
                 vec3 p = rd * t; float hf;
-                float d = density(A, p, hf); float stormHere = gStorm, coreHere = gCore;
+                float d = density(A, p, hf); float stormHere = gStorm, coreHere = gCore, aoHere = gAO;
+                if (gas) {
+                  if (!fine && d > 0.05) { fine = true; tg = max(t0, tg - dtg); dtg = thick * 0.007; continue; }
+                  if (fine) { fineN++; dtg = thick * 0.007 * (1.0 + float(fineN) * 0.06); } else dtg *= 1.025;
+                  tg += dtg;
+                  if (!fine) continue; // the thin veil above the tops is left to the haze
+                }
                 if (d > 0.002) {
-                  float ld = 0.0; float ls = thick * 0.12;
+                  float ld = 0.0; float ls = thick * (A.stack > 3.5 ? 0.02 : 0.12);
+                  gCoarse = gas; if (gas) ls = thick * 0.06;
                   for (int k = 1; k <= 3; k++) { float hh; ld += density(A, p + uSunDir * ls * float(k * k), hh) * ls * float(k * k); }
-                  float sl = sigma * 0.12;
+                  gCoarse = false;
+                  float sl = sigma * (gas ? 0.04 : 0.12); // gas decks: soft light through the billows, crisp shape from the big forms
                   float Tsun = exp(-ld * sl) + 0.5 * exp(-ld * sl * 0.25) + 0.25 * exp(-ld * sl * 0.06);
+                  if (uDbg > 1.5) Tsun = 1.0;
                   float powder = 1.0 - exp(-d * sigma * dt * 2.0);
                   // sun visibility at this point (planet shadow / terminator)
                   float up = dot(normalize(p - A.C), uSunDir);
                   float shade = smoothstep(-0.08, 0.05, up);
-                  vec3 lightC = uSunColor * sunT * shade * (Tsun * phase * mix(1.0, powder * 2.0, 0.35) * 0.55 + amb * (0.6 + 0.8 * hf) * 1.5);
+                  float ao = gas ? 0.05 + 0.95 * aoHere * aoHere : 0.6 + 0.8 * hf; // valleys between the billows sit in shade
+                  vec3 lightC = uSunColor * sunT * shade * (Tsun * phase * mix(1.0, powder * 2.0, 0.35) * 0.55 + amb * ao * 1.5);
+                  if (gas) {
+                    // shade the billows like a surface: normal from the big shapes where the ray first meets them
+                    if (!haveN && d > 0.35) { haveN = true; float e = thick * 0.07; float h2; gCoarse = true;
+                      float fx0, fx1, fy0, fy1, fz0, fz1;
+                      density(A, p + vec3(e, 0, 0), h2); fx1 = gField; density(A, p - vec3(e, 0, 0), h2); fx0 = gField;
+                      density(A, p + vec3(0, e, 0), h2); fy1 = gField; density(A, p - vec3(0, e, 0), h2); fy0 = gField;
+                      density(A, p + vec3(0, 0, e), h2); fz1 = gField; density(A, p - vec3(0, 0, e), h2); fz0 = gField;
+                      vec3 g = vec3(fx1 - fx0, fy1 - fy0, fz1 - fz0);
+                      gCoarse = false; vec3 upv = normalize(p - A.C); gN = length(g) > 1e-6 ? normalize(-g) : upv; gN = normalize(gN + upv * 0.25); }
+                    float lam = max(dot(gN, uSunDir) * 0.75 + 0.25, 0.0);           // wrapped: soft terminator on each head
+                    float rim = pow(1.0 - max(dot(gN, -rd), 0.0), 3.0) * max(dot(rd, uSunDir), 0.0);
+                    lightC = uSunColor * sunT * shade * ((mix(0.55, 1.0, lam) * 1.35 + rim * 0.5) * mix(0.3, 1.0, Tsun / 1.75) * (0.2 + 0.8 * ao) + amb * ao * 1.2); // crevices do the shaping, the sun angle adds form
+                  }
                   float Ti = exp(-d * sigma * dt);
                   vec3 tint = A.cloudColor;
-                  if (A.stack > 3.5) { vec3 dq = normalize(A.w2b * (p - A.C)); tint = mix(gasBand(A, dq, 1.0) * 1.2, vec3(1.0, 0.97, 0.92), (0.12 + 0.35 * hf) * (1.0 - coreHere * 0.85)); } // whiter ammonia-ice tops, but storms keep their colour
+                  if (A.stack > 3.5) { vec3 dq = normalize(A.w2b * (p - A.C)); vec3 bc = gasBand(A, dq, 1.0); bc = mix(vec3(dot(bc, vec3(0.3, 0.5, 0.2))), bc, 1.35); tint = mix(bc * 1.1, vec3(1.0, 0.97, 0.92), 0.1 * aoHere * (1.0 - coreHere * 0.85)); } // whiter ammonia-ice tops, but storms keep their colour
                   c3 += T3 * (1.0 - Ti) * lightC * tint;
-                  if (stormHere > 0.02) c3 += T3 * (1.0 - Ti) * lightningAt(A, A.w2b * (p - A.C), hf) * stormHere * 22.0;
+                  if (stormHere > 0.02) c3 += T3 * (1.0 - Ti) * lightningAt(A, A.w2b * (p - A.C), hf) * stormHere * (gas ? 5.0 * smoothstep(thick * 3.0, thick * 10.0, t) : 22.0); // up close the real bolts take over
+                  if (uBolt.w > 0.001) { vec3 db = p - uBolt.xyz; c3 += T3 * (1.0 - Ti) * vec3(0.75, 0.82, 1.0) * uBolt.w * 40.0 * exp(-dot(db, db) / (uBoltR * uBoltR)); } // a visible bolt lights its cloud
                   T3 *= Ti;
                 }
               }
             }
-            float tCut = t0 + min(t1 - t0, thick * 20.0);
-            bool tail = farW < 0.999 && t1 - t0 > thick * 20.0;
+            float Lmax = thick * (A.stack > 3.5 ? 7.0 : 20.0);
+            float tCut = t0 + min(t1 - t0, Lmax);
+            bool tail = farW < 0.999 && t1 - t0 > Lmax;
             vec4 c2 = (farW > 0.001 || tail) ? clouds2D(A, rd, sd, sunT, farW > 0.001 ? 0.0 : tCut) : vec4(0.0);
             if (t1 <= t0) { c3 = vec3(0.0); T3 = 1.0; }
             if (tail) { c3 += T3 * c2.rgb; T3 *= 1.0 - c2.a; }
@@ -458,6 +505,8 @@ export class Pipeline {
             float t0 = max(ta.x, 0.0), t1 = ta.y;
             if (tg.x > 0.0 && tg.x < 1e29) t1 = min(t1, tg.x);
             t1 = min(t1, sd < 1e29 ? sd * Lk : sd);
+            // a gas giant's opaque cloud deck ends the ray there: the crushing air below it is never seen
+            if (A.hasClouds > 0.5 && A.stack > 3.5 && cl.a < 0.6) { float Rd = A.Rb + (A.Rt - A.Rb) * 0.3; vec2 td = raySphere(rdA, A.C, dot(A.C, A.C) - Rd * Rd); if (td.x > 0.0 && td.x < 1e29) t1 = min(t1, td.x); }
             if (t1 <= t0) continue;
             int N = uSteps; float L = t1 - t0;
             vec2 od = vec2(0.0); vec3 sR = vec3(0.0), sM = vec3(0.0);
@@ -584,6 +633,7 @@ export class Pipeline {
       const g = list.slice(0, U.uNumA.value).find(a => a.clouds && a.clouds.stack === 4 && a.clouds.spots);
       if (g) for (const sp of g.clouds.spots) { if (ns >= 6) break; cu.uSpot.value[ns].set(sp.dir[0], sp.dir[1], sp.dir[2], sp.R); cu.uSpotS.value[ns].set(sp.aspect, sp.spin, 0, 0); ns++; }
       cu.uNumSpot.value = ns; cu.uClock.value = (performance.now() / 1000) % 3600;
+      const bo = frame.bolt; if (bo && bo.I > 0) { cu.uBolt.value.set(bo.pos.x, bo.pos.y, bo.pos.z, bo.I); cu.uBoltR.value = bo.R; } else cu.uBolt.value.w = 0;
     }
     this.cloudMat.uniforms.uHasMap.value = hasMap; this.cloudMat.uniforms.uCloudMap.value = map || this.noiseDummy(); this.cloudMat.uniforms.uCloudMap1.value = map1 || this.noiseDummy(); if (!this.cloudMat.uniforms.uCloudReal.value) this.cloudMat.uniforms.uCloudReal.value = this.noiseDummy();
     const anyClouds = list.slice(0, U.uNumA.value).some(a => a.clouds);

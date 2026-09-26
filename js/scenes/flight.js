@@ -127,6 +127,7 @@ export class FlightScene {
   }
   // set a vessel down upright on a body's surface at lat/lon (degrees)
   landAt(v, body, lat, lon, extra = 0) {
+    if (this.lfx) this.lfx.clear(); // launch smoke and frost stay at the pad
     const d = latLonToDir(lat, lon); const hgt = body.surface ? body.surface.height(...d) : 0;
     const hCom = v.com[1] - v.bottom + 0.3 + extra + Math.max(hgt, body.name === 'Earth' ? 0 : -1e9);
     const bf = [d[0] * (body.radius + hCom), d[1] * (body.radius + hCom), d[2] * (body.radius + hCom)];
@@ -135,6 +136,7 @@ export class FlightScene {
   }
   // circular (equatorial-ish) orbit at altitude alt (m) around body
   orbitAt(v, body, alt, inc = 0) {
+    if (this.lfx) this.lfx.clear();
     const r = body.radius + alt; const pole = new THREE.Vector3(body.poleAxis.x, body.poleAxis.y, body.poleAxis.z);
     const rv = new THREE.Vector3(1, 0, 0).applyQuaternion(body.poleQuat).applyAxisAngle(pole, Math.random() * Math.PI * 2);
     const vv = new THREE.Vector3().crossVectors(pole, rv).normalize().applyAxisAngle(rv, inc * Math.PI / 180);
