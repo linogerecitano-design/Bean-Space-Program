@@ -98,38 +98,50 @@ function makeSmokeCloud() {
 }
 
 // ---------------------------------------------------------------- frost vapour
-// Cold air sliding off frosted tanks: a thin sheet hugging the tank walls that streams toward the tail
-// (down the sides on the pad, along the airflow in flight) and trails behind the vehicle.
+// Cold air sliding off frosted tanks: a thin sheet hugging the tank walls that pours away along the flow
+// (down with gravity on the pad or when slow, back along the airflow once moving) and trails off, however
+// the rocket is turned. Frame: world axes, origin at the vessel's centre of mass.
 function makeFrostVapor() {
   const U = volUniforms({ uR: { value: 2 }, uY0: { value: 0 }, uY1: { value: 10 }, uK: { value: 0 }, uFlow: { value: 1 }, uTrail: { value: 20 },
+    uAxis: { value: new THREE.Vector3(0, 1, 0) }, uDown: { value: new THREE.Vector3(0, -1, 0) }, uE1: { value: new THREE.Vector3(1, 0, 0) }, uE2: { value: new THREE.Vector3(0, 0, 1) },
     uSunL: { value: new THREE.Vector3(0, 1, 0) }, uSunC: { value: new THREE.Vector3(1, 1, 1) }, uAmb: { value: new THREE.Vector3(0.3, 0.35, 0.4) } });
   U.uSteps.value = steps(0.5);
   const frag = `${VOL_COMMON}
-    uniform float uR, uY0, uY1, uK, uFlow, uTrail; uniform vec3 uSunL, uSunC, uAmb;
+    uniform float uR, uY0, uY1, uK, uFlow, uTrail; uniform vec3 uSunL, uSunC, uAmb, uAxis, uDown, uE1, uE2;
+    // the sheet on the tank walls (x: point relative to the centre of mass; w: how far it has drifted)
+    float sheet(vec3 x, float w){
+      float ya = dot(x, uAxis); float rho = length(x - uAxis * ya);
+      float R = uR + w * 0.22;
+      float span = smoothstep(uY1 + 0.5, uY1 - 1.5, ya) * smoothstep(uY0 - 1.0 - w * 0.3, uY0 + 0.2, ya);
+      return exp(-max(rho - R, 0.0) / (0.18 * uR + w * 0.1)) * smoothstep(uR * 0.96, uR * 1.02, rho + w * 0.2) * span;
+    }
     float dens(vec3 p){
-      float rho = length(p.xz);
-      float below = max(uY0 - p.y, 0.0);                  // distance behind the frosted section
-      float R = uR + below * 0.22;                         // the trail widens as it mixes
-      float sheet = exp(-max(rho - R, 0.0) / (0.18 * uR + below * 0.1)) * smoothstep(uR * 0.96, uR * 1.02, rho + below * 0.2);
-      float span = smoothstep(uY1 + 0.5, uY1 - 1.5, p.y) * exp(-below / uTrail);
-      if (sheet * span < 0.01) return 0.0;
-      vec3 q = vec3(p.x * 1.1, p.y * 0.18 + uTime * uFlow, p.z * 1.1);      // streaks stretched along the flow
+      // follow the flow line back upstream: the vapour here left the tank k metres ago
+      float best = 0.0; float k = 0.0;
+      for (int j = 0; j < 7; j++) {
+        float d = sheet(p - uDown * k, k) * exp(-k / uTrail);
+        best = max(best, d); k = k < 0.5 ? 1.0 : k * 2.2;
+      }
+      if (best < 0.01) return 0.0;
+      float s = dot(p, uDown);
+      vec3 q = vec3(dot(p, uE1) * 1.1, -s * 0.18 + uTime * uFlow, dot(p, uE2) * 1.1);   // streaks stretched along the flow
       float n = snoise(q) * 0.6 + snoise(q * 2.3 + 1.7) * 0.4;
-      return sheet * span * smoothstep(-0.25, 0.6, n) * uK;
+      return best * smoothstep(-0.25, 0.6, n) * uK;
     }
     void main(){
       vec3 ro = uCamLocal, rd = normalize(vLocal - uCamLocal);
       vec2 th = boxHit(ro, rd); float t0 = max(th.x, 0.0), t1 = min(th.y, sceneDistance());
       if (t1 <= t0 || uK < 0.002) discard;
       int N = uSteps; float dt = (t1 - t0) / float(N); float t = t0 + dt * ign(gl_FragCoord.xy + fract(uTime * 5.31) * 41.0);
-      float day = smoothstep(-0.12, 0.08, uSunL.y);
+      float day = 1.0; // (the sun colour already carries night and the planet's shadow)
       vec3 col = vec3(0.0); float T = 1.0;
       for (int i = 0; i < 48; i++) {
         if (i >= N || T < 0.05) break;
         vec3 p = ro + rd * t; t += dt;
         float d = dens(p); if (d < 0.003) continue;
         float a = 1.0 - exp(-d * 1.6 * dt);
-        vec3 e = vec3(0.92, 0.95, 1.0) * (uSunC * day * (0.6 + 0.4 * max(dot(normalize(vec3(p.x, 0.0, p.z) + 1e-4), uSunL), 0.0)) + uAmb);
+        float ya = dot(p, uAxis); vec3 rv = p - uAxis * ya;
+        vec3 e = vec3(0.92, 0.95, 1.0) * (uSunC * day * (0.6 + 0.4 * max(dot(normalize(rv + 1e-4), uSunL), 0.0)) + uAmb);
         col += T * a * e; T *= 1.0 - a;
       }
       if (T > 0.995) discard;
@@ -236,8 +248,8 @@ export class LaunchFX {
     this.mesh = mesh;
     let y0 = Infinity, y1 = -Infinity, r = 0;
     // a part's origin is its top; it extends h downward
-    for (const { rt } of this.cryoParts) { const y = rt.pl.pos[1] - v.com[1], h = rt.part.h || 1; y0 = Math.min(y0, y - h); y1 = Math.max(y1, y); r = Math.max(r, (rt.part.d || 1) / 2); }
-    this.cryoSpan = this.cryoParts.length ? { y0, y1, r } : null;
+    for (const { rt } of this.cryoParts) { const y = rt.pl.pos[1], h = rt.part.h || 1; y0 = Math.min(y0, y - h); y1 = Math.max(y1, y); r = Math.max(r, (rt.part.d || 1) / 2); }
+    this.cryoSpan = this.cryoParts.length ? { y0, y1, r } : null; this.liveN = this.cryoParts.length; this.liveCryo = this.cryoParts;
     this.frost = frosty && this.cryoParts.length ? 1 : 0; this.frostU.uFrost.value = this.frost;
     this.liftT = null;
   }
@@ -353,6 +365,16 @@ export class LaunchFX {
     this.clouds = this.clouds.filter(c => { if (!c.puffs.length && c.age > 2) { this.world.volScene.remove(c.mesh); return false; } return true; });
 
     // ------------------------------------------------ frost melt, vapour, ice shedding
+    // only tanks still on the vessel steam and shed ice (a separated stage takes its frost with it)
+    if (this.cryoParts) {
+      const live = this.cryoParts.filter(({ rt }) => rt.attached !== false && !rt.broken);
+      if (live.length !== this.liveN) {
+        this.liveN = live.length;
+        let y0 = Infinity, y1 = -Infinity, r = 0;
+        for (const { rt } of live) { const y = rt.pl.pos[1], h = rt.part.h || 1; y0 = Math.min(y0, y - h); y1 = Math.max(y1, y); r = Math.max(r, (rt.part.d || 1) / 2); }
+        this.cryoSpan = live.length ? { y0, y1, r } : null; this.liveCryo = live;
+      }
+    }
     if (this.frostU && this.cryoSpan) {
       const launched = v.situation !== 'prelaunch' && !v.clamped;
       if (launched && this.liftT === null) this.liftT = this.t;
@@ -369,20 +391,37 @@ export class LaunchFX {
       this.vapor.visible = show;
       if (show) {
         const U = this.vapor.userData.U;
-        U.uR.value = S.r; U.uY0.value = S.y0; U.uY1.value = S.y1;
+        U.uR.value = S.r;
         const speed = v.v.clone().sub(v.body.surfaceVel(v.r)).len();
         U.uK.value = Math.min(1, this.frost * 1.3) * air * (launched ? 1.4 : 0.8);
         U.uFlow.value = launched ? 0.4 + speed * 0.05 : 0.35; U.uTrail.value = launched ? 6 + speed * 0.15 : S.r * 2.5;
+        // span relative to the current centre of mass (it moves when stages separate)
+        const Y0 = S.y0 - v.com[1], Y1 = S.y1 - v.com[1];
+        U.uY0.value = Y0; U.uY1.value = Y1;
+        // flow: down with gravity when slow, back along the airflow when moving
+        const upW = new THREE.Vector3(v.r.x, v.r.y, v.r.z).normalize();
+        const airW = v.v.clone().sub(v.body.surfaceVel(v.r)); const aw = new THREE.Vector3(airW.x, airW.y, airW.z);
+        const wk = THREE.MathUtils.smoothstep(speed, 2, 25);
+        const down = upW.clone().negate().multiplyScalar(1 - wk).addScaledVector(aw.lengthSq() > 1e-6 ? aw.normalize().negate() : upW.clone().negate(), wk).normalize();
+        const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(v.q);
+        U.uAxis.value.copy(axis); U.uDown.value.copy(down);
+        const e1 = new THREE.Vector3().crossVectors(down, Math.abs(down.y) < 0.9 ? Y : new THREE.Vector3(1, 0, 0)).normalize();
+        U.uE1.value.copy(e1); U.uE2.value.crossVectors(down, e1);
+        // bounds: the tank section and where its vapour can drift to
         const trail = Math.min(200, U.uTrail.value * 3), wR = S.r * 1.6 + trail * 0.22 + 1;
-        U.uBMin.value.set(-wR, S.y0 - trail, -wR); U.uBMax.value.set(wR, S.y1 + 1, wR);
-        this.vapor.position.copy(ctx.focusRel); this.vapor.quaternion.copy(v.q);
-        U.uSunL.value.copy(sunW).applyQuaternion(_q.copy(v.q).invert()); U.uSunC.value.copy(sunC); U.uAmb.value.copy(amb); U.uTime.value = this.t;
+        const bmin = new THREE.Vector3(Infinity, Infinity, Infinity), bmax = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+        for (const yy of [Y0, Y1]) for (const kk of [0, trail]) { const c = axis.clone().multiplyScalar(yy).addScaledVector(down, kk); bmin.min(c); bmax.max(c); }
+        bmin.subScalar(wR); bmax.addScalar(wR);
+        U.uBMin.value.copy(bmin); U.uBMax.value.copy(bmax);
+        this.vapor.position.copy(ctx.focusRel); this.vapor.quaternion.identity();
+        U.uSunL.value.copy(sunW); U.uSunC.value.copy(sunC); U.uAmb.value.copy(amb); U.uTime.value = this.t;
       }
       // flakes and chunks of ice shed from the tanks while the frost melts
-      if (melt > 0 && this.cryoParts.length) {
+      const src = this.liveCryo || this.cryoParts;
+      if (melt > 0 && src.length) {
         const n = Math.min(40, Math.floor(melt * dt * 2400 + Math.random()));
         for (let i = 0; i < n; i++) {
-          const { rt } = this.cryoParts[Math.floor(Math.random() * this.cryoParts.length)];
+          const { rt } = src[Math.floor(Math.random() * src.length)];
           const r = (rt.part.d || 1) / 2, a = Math.random() * Math.PI * 2, y = rt.pl.pos[1] - v.com[1] - Math.random() * (rt.part.h || 1);
           _v.set(Math.cos(a) * r, y, Math.sin(a) * r).applyQuaternion(v.q); _v2.set(Math.cos(a), 0, Math.sin(a)).applyQuaternion(v.q);
           const pr = v.r.clone(); pr.x += _v.x; pr.y += _v.y; pr.z += _v.z;
