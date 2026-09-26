@@ -8,6 +8,7 @@ import { loadAstronautBase } from './render/astronaut.js';
 import { endFrame } from './core/input.js';
 import { newGame, loadLocal, saveLocal, cloud } from './game/save.js';
 import { progress } from './ui/ui.js';
+import { initCompactDrawers } from './ui/compact.js';
 import { MenuScene } from './scenes/menu.js';
 import { SpaceCenterScene } from './scenes/spaceCenter.js';
 import { VABScene } from './scenes/vab.js';
@@ -40,6 +41,7 @@ function setCompact() {
   document.body.classList.toggle('portrait', innerHeight > innerWidth);
 }
 setCompact(); addEventListener('resize', setCompact);
+initCompactDrawers();
 
 async function boot() {
   cloud.init(); // resolves in parallel with loading (null when not hosted on claude.ai)
