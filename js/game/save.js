@@ -61,7 +61,7 @@ export function careerDesigns() {
   return [d('Castor Hopper', hop), d('Sounding Probe', snd)];
 }
 export function newGame(mode = 'sandbox') {
-  const g = newGameBase(mode);
+  const g = newGameBase(mode); g.slot = newSlotId(); g.name = nameFor(mode);
   if (mode === 'career') { initCareer(g); g.designs = careerDesigns(); g.selectedDesign = 0; }
   return g;
 }
@@ -82,8 +82,33 @@ export function hireAstronaut(game) {
 // ---------------------------------------------------------------- persistence
 const serialize = (g) => JSON.stringify(g, (k, v) => v === Infinity ? '__inf' : v);
 const deserialize = (s) => JSON.parse(s, (k, v) => v === '__inf' ? Infinity : v);
-export function saveLocal(game) { game.updated = Date.now(); try { localStorage.setItem(KEY, serialize(game)); return true; } catch (e) { return false; } }
-export function loadLocal() { try { const s = localStorage.getItem(KEY); return s ? deserialize(s) : null; } catch (e) { return null; } }
+// Save slots: every game has its own id; an index lists them for the save selector.
+const INDEX = 'bsp.slots.v1', LAST_SLOT = 'bsp.lastSlot';
+const slotKey = (id) => 'bsp.save.v1.' + id;
+const newSlotId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+export function slotSummary(g) { return { id: g.slot, name: g.name, mode: g.mode, updated: g.updated || 0, funds: g.funds === Infinity ? null : g.funds, tp: g.tp || 0, facility: g.facility || 0, t: g.t }; }
+function nameFor(mode) { const n = readIndex().filter(x => x.mode === mode).length + 1; return `${mode === 'career' ? 'Career' : 'Sandbox'} ${n}`; }
+export function ensureSlot(game) { if (!game.slot) game.slot = newSlotId(); if (!game.name) game.name = nameFor(game.mode || 'sandbox'); return game; }
+function readIndex() { try { return JSON.parse(localStorage.getItem(INDEX) || '[]'); } catch (e) { return []; } }
+function writeIndex(list) { try { localStorage.setItem(INDEX, JSON.stringify(list)); } catch (e) {} }
+let migrating = false;
+function migrateLegacy() { // the old single save becomes the first slot
+  if (migrating) return; migrating = true;
+  try { const s = localStorage.getItem(KEY); if (!s) return; const g = deserialize(s); ensureSlot(g); localStorage.setItem(slotKey(g.slot), serialize(g)); writeIndex([...readIndex().filter(x => x.id !== g.slot), slotSummary(g)]); localStorage.setItem(LAST_SLOT, g.slot); localStorage.removeItem(KEY); } catch (e) {} finally { migrating = false; }
+}
+export function listLocal() { migrateLegacy(); return readIndex().sort((a, b) => b.updated - a.updated); }
+export function saveLocal(game) {
+  ensureSlot(game); game.updated = Date.now();
+  try { localStorage.setItem(slotKey(game.slot), serialize(game)); localStorage.setItem(LAST_SLOT, game.slot); } catch (e) { return false; }
+  writeIndex([...readIndex().filter(x => x.id !== game.slot), slotSummary(game)]);
+  return true;
+}
+export function loadLocal(id) {
+  migrateLegacy();
+  try { id ||= localStorage.getItem(LAST_SLOT) || listLocal()[0]?.id; if (!id) return null; const s = localStorage.getItem(slotKey(id)); return s ? deserialize(s) : null; } catch (e) { return null; }
+}
+export function deleteLocal(id) { try { localStorage.removeItem(slotKey(id)); if (localStorage.getItem(LAST_SLOT) === id) localStorage.removeItem(LAST_SLOT); } catch (e) {} writeIndex(readIndex().filter(x => x.id !== id)); }
+export function renameLocal(id, name) { const g = loadLocal(id); if (!g) return; g.name = name; const u = g.updated; saveLocal(g); }
 
 async function gz(text) { const cs = new CompressionStream('gzip'); const b = await new Response(new Blob([text]).stream().pipeThrough(cs)).arrayBuffer(); return btoa(String.fromCharCode(...new Uint8Array(b))); }
 async function gunzip(b64) { const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); const ds = new DecompressionStream('gzip'); return await new Response(new Blob([bin]).stream().pipeThrough(ds)).text(); }
@@ -112,29 +137,67 @@ function ns() {
 export const cloud = {
   available() { return _ready; },
   init() { return ns(); },
+  async _list(n) { const d = await n.db.doc(`${n.base}/slots`).get(); return d.exists ? (d.data().list || []) : null; },
+  async _setList(n, list) { await n.db.doc(`${n.base}/slots`).set({ list }); },
+  async _write(n, game) {
+    const id = game.slot, code = await exportCode(game); const parts = Math.ceil(code.length / CHUNK);
+    for (let i = 0; i < parts; i++) await n.db.doc(`${n.base}/s_${id}_${i}`).set({ s: code.slice(i * CHUNK, (i + 1) * CHUNK) });
+    await n.db.doc(`${n.base}/s_${id}`).set({ parts, updated: game.updated || Date.now(), version: 2 });
+    const list = (await this._list(n)) || []; await this._setList(n, [...list.filter(x => x.id !== id), slotSummary(game)]);
+  },
   async save(game) {
     const n = await ns(); if (!n) return false;
+    ensureSlot(game);
     if (_saving) { this._next = game; return _saving; } // one write chain at a time
     _saving = (async () => {
-      try {
-        const code = await exportCode(game);
-        const parts = Math.ceil(code.length / CHUNK);
-        for (let i = 0; i < parts; i++) await n.db.doc(`${n.base}/save_${i}`).set({ s: code.slice(i * CHUNK, (i + 1) * CHUNK) });
-        await n.db.doc(`${n.base}/save`).set({ parts, updated: game.updated || Date.now(), version: 1 });
-        return true;
-      } catch (e) { console.warn('cloud save failed', e && e.code, e && e.message); return false; }
+      try { await this._write(n, game); return true; }
+      catch (e) { console.warn('cloud save failed', e && e.code, e && e.message); return false; }
       finally { _saving = null; if (this._next) { const g = this._next; this._next = null; this.save(g); } }
     })();
     return _saving;
   },
-  async load() {
-    const n = await ns(); if (!n) return null;
+  // slot summaries in the cloud (migrating the old single cloud save the first time)
+  async list() {
+    const n = await ns(); if (!n) return [];
     try {
-      const idx = await n.db.doc(`${n.base}/save`).get(); if (!idx.exists) return null;
-      const { parts } = idx.data();
-      let code = '';
-      for (let i = 0; i < parts; i++) { const d = await n.db.doc(`${n.base}/save_${i}`).get(); if (!d.exists) return null; code += d.data().s; }
+      let list = await this._list(n);
+      if (!list) {
+        list = [];
+        const idx = await n.db.doc(`${n.base}/save`).get();
+        if (idx.exists) { const { parts } = idx.data(); let code = ''; for (let i = 0; i < parts; i++) { const d = await n.db.doc(`${n.base}/save_${i}`).get(); if (!d.exists) { code = ''; break; } code += d.data().s; }
+          if (code) { const g = ensureSlot(await importCode(code)); await this._write(n, g); list = [slotSummary(g)]; } }
+        else await this._setList(n, []);
+      }
+      return list.sort((a, b) => b.updated - a.updated);
+    } catch (e) { console.warn('cloud list failed', e && e.code); return []; }
+  },
+  async load(id) {
+    const n = await ns(); if (!n || !id) return null;
+    try {
+      const idx = await n.db.doc(`${n.base}/s_${id}`).get(); if (!idx.exists) return null;
+      const { parts } = idx.data(); let code = '';
+      for (let i = 0; i < parts; i++) { const d = await n.db.doc(`${n.base}/s_${id}_${i}`).get(); if (!d.exists) return null; code += d.data().s; }
       return await importCode(code);
     } catch (e) { console.warn('cloud load failed', e && e.code); return null; }
   },
+  async remove(id) {
+    const n = await ns(); if (!n) return;
+    try { const list = (await this._list(n)) || []; await this._setList(n, list.filter(x => x.id !== id)); const d = n.db.doc(`${n.base}/s_${id}`); if (d.delete) await d.delete(); else await d.set({ deleted: true, parts: 0 }); } catch (e) { console.warn('cloud delete failed', e && e.code); }
+  },
 };
+// every save the player has, local and cloud merged (newest copy of each wins)
+export async function listSaves() {
+  const m = new Map();
+  for (const x of listLocal()) m.set(x.id, { ...x, local: true });
+  for (const x of await cloud.list()) { const o = m.get(x.id); if (!o || x.updated > o.updated) m.set(x.id, { ...x, local: !!o, cloudNewer: true }); }
+  return [...m.values()].sort((a, b) => b.updated - a.updated);
+}
+export async function loadSave(entry) {
+  let g = null;
+  if (entry.cloudNewer) g = await cloud.load(entry.id);
+  if (!g) g = loadLocal(entry.id);
+  if (!g && !entry.cloudNewer) g = await cloud.load(entry.id);
+  if (g) { ensureSlot(g); saveLocal(g); }
+  return g;
+}
+export async function deleteSave(id) { deleteLocal(id); await cloud.remove(id); }

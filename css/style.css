@@ -301,3 +301,13 @@ button.glow { box-shadow: 0 0 18px rgba(245, 158, 11, .6); }
 body.compact #side.contracts { width: auto; }
 .tsheet-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .tsheet .tsheet-head button { width: auto; flex: none; }
+
+/* ---------------- save selector */
+.saves { gap: 8px; max-height: 60vh; overflow: auto; min-width: min(520px, 84vw); }
+.save-row { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: rgba(30, 41, 59, .55); }
+.save-row.cur { border-color: var(--acc); }
+.save-badge { font-size: 22px; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; flex: none; background: rgba(56, 189, 248, .15); }
+.save-badge.career { background: rgba(245, 158, 11, .18); }
+.save-txt { flex: 1; min-width: 0; } .save-txt b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-btns { display: flex; gap: 4px; flex: none; } .save-btns button { padding: 6px 10px; }
+body.compact .save-row { flex-wrap: wrap; } body.compact .save-btns { width: 100%; } body.compact .save-btns button.primary { flex: 1; }

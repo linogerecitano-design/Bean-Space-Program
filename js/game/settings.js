@@ -8,6 +8,7 @@ export const PRESETS = {
   high:   { label: 'High',   scale: 1.0,  maxDpr: 1.5, cloudSteps: 32, atmoSteps: 16, shadow: 2048, scatter: 1.0,  splitK: 2.2, clouds3d: 1, msaa: 4 },
   ultra:  { label: 'Ultra',  scale: 1.0,  maxDpr: 2,   cloudSteps: 48, atmoSteps: 20, shadow: 4096, scatter: 1.3,  splitK: 2.8, clouds3d: 1.3, msaa: 4 },
 };
+const PHONE_AUTO = { ...PRESETS.medium, scale: 0.8, maxDpr: 2 };
 const KEY = 'bsp-graphics';
 let preset = 'auto';
 try { preset = localStorage.getItem(KEY) || 'auto'; } catch (e) {}
@@ -18,7 +19,8 @@ export const settings = {
   get preset() { return preset; },
   get auto() { return preset === 'auto'; },
   // the effective parameter set
-  get q() { return PRESETS[preset === 'auto' ? (IS_MOBILE ? 'medium' : 'high') : preset]; },
+  // phones: Medium effects, but render near the screen's real resolution (the dynamic scale steps down if frames get slow)
+  get q() { return preset === 'auto' ? (IS_MOBILE ? PHONE_AUTO : PRESETS.high) : PRESETS[preset]; },
   set(p) { preset = p; try { localStorage.setItem(KEY, p); } catch (e) {} for (const f of listeners) try { f(); } catch (e) { console.error(e); } },
   onChange(f) { listeners.add(f); },
 };

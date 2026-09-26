@@ -6,7 +6,7 @@ import { loadCpuMaps, loadGroundArrays, IS_MOBILE, ensureAlbedo } from './render
 import { loadScatterLibrary } from './render/scatter.js';
 import { loadAstronautBase } from './render/astronaut.js';
 import { endFrame } from './core/input.js';
-import { newGame, loadLocal, saveLocal, cloud } from './game/save.js';
+import { newGame, loadLocal, saveLocal, cloud, loadSave } from './game/save.js';
 import { progress } from './ui/ui.js';
 import { initCompactDrawers } from './ui/compact.js';
 import { MenuScene } from './scenes/menu.js';
@@ -65,8 +65,9 @@ async function boot() {
   ensureAlbedo('Earth');
   await Promise.race([scatterP, new Promise(r => setTimeout(r, new URLSearchParams(location.search).get('scene') ? 1500 : IS_MOBILE ? 4000 : 15000))]); tick();
   // saves: prefer the newest of local and cloud
-  const local = loadLocal(); const remote = await cloud.load();
-  G.game = [local, remote].filter(Boolean).sort((a, b) => (b.updated || 0) - (a.updated || 0))[0] || null;
+  // saves: continue the last-played slot, or a newer one from the cloud (played on another device)
+  const local = loadLocal(); const remote = (await cloud.list())[0];
+  G.game = remote && (!local || remote.updated > (local.updated || 0)) ? (await loadSave({ ...remote, cloudNewer: true })) || local : local;
   G.scenes = { menu: new MenuScene(G), center: new SpaceCenterScene(G), vab: new VABScene(G), flight: new FlightScene(G), tracking: new TrackingScene(G), galaxy: new GalaxyScene(G), astronauts: new AstronautScene(G), rnd: new RnDScene(G), mission: new MissionScene(G) };
   document.getElementById('loading').remove();
   const qs = new URLSearchParams(location.search);
