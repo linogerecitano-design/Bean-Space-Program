@@ -80,12 +80,14 @@ export class Pipeline {
     this.r = renderer;
     this.quality = IS_MOBILE ? 0 : 1;
     const S = new THREE.Vector2(); renderer.getDrawingBufferSize(S);
-    const mkRT = (w, h, depth) => {
-      const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: !!depth });
+    const mkRT = (w, h, depth, samples = 0) => {
+      const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: !!depth, samples });
       if (depth) { rt.depthTexture = new THREE.DepthTexture(w, h, THREE.FloatType); }
       return rt;
     };
-    this.sceneRT = mkRT(S.x, S.y, true);
+    // multisampled on capable settings: the scene is rendered off-screen, so the canvas' own antialias flag
+    // never applied and thin geometry (grass, branches, the tower) crawled with aliasing
+    this.sceneRT = mkRT(S.x, S.y, true, settings.q.msaa || 0);
     this.cloudRT = mkRT(Math.ceil(S.x / 2), Math.ceil(S.y / 2), false);
     this.cloudHist = [mkRT(Math.ceil(S.x / 2), Math.ceil(S.y / 2), false), mkRT(Math.ceil(S.x / 2), Math.ceil(S.y / 2), false)]; this.histI = 0; this.histValid = false; this.frame = 0;
     this.hdrRT = mkRT(S.x, S.y, false);
@@ -314,10 +316,30 @@ export class Pipeline {
         }`,
     });
     this.compMat = new THREE.ShaderMaterial({
-      uniforms: { ...this.common, uScene: { value: this.sceneRT.texture }, uClouds: { value: this.cloudRT.texture }, uSteps: { value: settings.q.atmoSteps }, uSSS: { value: settings.q.shadow >= 2048 ? 1 : 0 } },
+      uniforms: { ...this.common, uScene: { value: this.sceneRT.texture }, uClouds: { value: this.cloudRT.texture }, uCloudTexel: { value: new THREE.Vector2(1, 1) }, uSteps: { value: settings.q.atmoSteps }, uSSS: { value: settings.q.shadow >= 2048 ? 1 : 0 } },
       vertexShader: FSQ_V,
       fragmentShader: `${ATMO_COMMON}
-        uniform sampler2D uScene, uClouds; uniform int uSteps; uniform float uSSS; varying vec2 vUv;
+        uniform sampler2D uScene, uClouds; uniform int uSteps; uniform float uSSS; uniform vec2 uCloudTexel; varying vec2 vUv;
+        // Depth-aware upsample of the half-resolution clouds: each low-res texel is weighted by how well the depth
+        // it was marched against matches this pixel's. A plain bilinear fetch bled bright cloud/sky into every
+        // leaf, branch and antenna standing against the sky as white speckles and halos.
+        float viewZ(vec2 uv) { float d = texture(uDepth, uv).r; return d >= 0.99999 ? 1e30 : exp2(d * uLogFar) - 1.0; }
+        vec4 cloudsAt(vec2 uv) {
+          float z = viewZ(uv);
+          vec2 p = uv / uCloudTexel - 0.5; vec2 f = fract(p), b = floor(p);
+          vec4 acc = vec4(0.0); float ws = 0.0; vec4 nearest = vec4(0.0, 0.0, 0.0, 1.0); float nd = 1e38;
+          for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {
+            vec2 tuv = (b + vec2(float(i), float(j)) + 0.5) * uCloudTexel;
+            float zi = viewZ(tuv);
+            float rel = (z > 1e29 && zi > 1e29) ? 0.0 : (z > 1e29 || zi > 1e29) ? 1e3 : abs(zi - z) / max(min(zi, z), 0.5);
+            float wb = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
+            vec4 c = texture(uClouds, tuv);
+            float w = wb * exp(-rel * 12.0);
+            acc += c * w; ws += w;
+            if (rel < nd) { nd = rel; nearest = c; }
+          }
+          return ws > 1e-4 ? acc / ws : nearest;
+        }
         // screen-space raymarched shadows: walk from the surface toward the sun through the depth
         // buffer; anything in front of the ray (within a thickness window) blocks the light
         float ssShadow(vec3 rd, float sd) {
@@ -340,7 +362,7 @@ export class Pipeline {
           vec3 col = texture(uScene, vUv).rgb;
           // near-field only (vessels, rocks, boulders): at kilometre scales depth precision makes it unreliable
           if (uSSS > 0.5 && sd < 1500.0) { float sh = ssShadow(rd, sd); col *= mix(mix(0.25, 1.0, sh), 1.0, smoothstep(700.0, 1500.0, sd)); }
-          vec4 cl = texture(uClouds, vUv);
+          vec4 cl = cloudsAt(vUv);
           col = col * cl.a + cl.rgb;
           for (int ai = 0; ai < ${MAX_ATMO}; ai++) {
             if (ai >= uNumA) break;
@@ -427,11 +449,14 @@ export class Pipeline {
         }`,
     });
   }
-  applyQuality(q) { this.cloudMat.uniforms.uSteps.value = q.cloudSteps; this.compMat.uniforms.uSteps.value = q.atmoSteps; this.cloudMat.uniforms.uFar3D.value = q.clouds3d; this.compMat.uniforms.uSSS.value = q.shadow >= 2048 ? 1 : 0; }
+  applyQuality(q) {
+    const ms = q.msaa || 0; if (this.sceneRT.samples !== ms) { this.sceneRT.dispose(); this.sceneRT.samples = ms; }
+    this.cloudMat.uniforms.uSteps.value = q.cloudSteps; this.compMat.uniforms.uSteps.value = q.atmoSteps; this.cloudMat.uniforms.uFar3D.value = q.clouds3d; this.compMat.uniforms.uSSS.value = q.shadow >= 2048 ? 1 : 0; }
   noiseDummy() { if (!this._dummy) { this._dummy = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); this._dummy.needsUpdate = true; } return this._dummy; }
   setSize(w, h) {
     this.sceneRT.setSize(w, h); this.sceneRT.depthTexture.image.width = w; this.sceneRT.depthTexture.image.height = h;
     this.cloudRT.setSize(Math.ceil(w / 2), Math.ceil(h / 2)); this.hdrRT.setSize(w, h);
+    this.compMat.uniforms.uCloudTexel.value.set(1 / Math.ceil(w / 2), 1 / Math.ceil(h / 2));
     for (const rt of this.cloudHist) rt.setSize(Math.ceil(w / 2), Math.ceil(h / 2)); this.histValid = false;
     let bw = w, bh = h; for (const b of this.bloom) { bw = Math.max(1, bw >> 1); bh = Math.max(1, bh >> 1); b.setSize(bw, bh); }
     this.finalMat.uniforms.uAspect.value = w / h;

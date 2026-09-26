@@ -5,7 +5,7 @@ import { Terrain } from './terrain.js';
 import { makeGasMaterial, makeStarMaterial, makeGlowSprite, makeRings, BodyPoints } from './bodies.js';
 import { Pipeline } from './post.js';
 import { Sky } from './sky.js';
-import { Scatter, scatterTime } from './scatter.js';
+import { Scatter, scatterTime, setFoliageAA } from './scatter.js';
 import { planetTexture, PLANET_EXTRA, IS_MOBILE, getGroundArrays } from './textures.js';
 import { blackbody } from './glsl.js';
 import { requestBake, prefetchSystem, bakeListeners } from '../gen/baker.js';
@@ -27,7 +27,7 @@ export class World {
     r.shadowMap.enabled = settings.q.shadow > 0; r.shadowMap.type = THREE.PCFShadowMap;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 1e17);
-    this.pipeline = new Pipeline(r);
+    this.pipeline = new Pipeline(r); setFoliageAA((settings.q.msaa || 0) > 0);
     this.sky = new Sky(r); this.scene.add(this.sky.mesh);
     this.sun = new THREE.DirectionalLight(0xffffff, 3); this.sun.castShadow = true;
     const sc = this.sun.shadow; sc.mapSize.set(settings.q.shadow || 512, settings.q.shadow || 512); sc.camera.near = 1; sc.camera.far = 4000; sc.bias = -0.0004; sc.normalBias = 0.05;
@@ -64,7 +64,7 @@ export class World {
     const wantShadow = q.shadow > 0;
     if (r.shadowMap.enabled !== wantShadow) { r.shadowMap.enabled = wantShadow; this.scene.traverse(o => { if (o.material) [].concat(o.material).forEach(m => m.needsUpdate = true); }); }
     const ms = q.shadow || 512; if (this.sun.shadow.mapSize.x !== ms) { this.sun.shadow.mapSize.set(ms, ms); if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; } }
-    this.pipeline.applyQuality(q);
+    this.pipeline.applyQuality(q); setFoliageAA((q.msaa || 0) > 0);
     this.resize();
   }
   // Dynamic resolution: watch real frame times and trade internal resolution for frame rate
@@ -206,7 +206,13 @@ export class World {
           if (U.uHasGround.value < 0.5 && getGroundArrays()) { const ga = getGroundArrays(); U.uGroundA.value = ga.albedo; U.uGroundN.value = ga.normal; U.uHasGround.value = 1; }
           const budget = frame.budget ?? (IS_MOBILE ? 5 : 8);
           v.terrain.update(camBF, budget, frame.lodScale ?? 1);
-          if (v.scatter) { v.scatter.site = frame.siteBF && b.name === frame.siteBody ? frame.siteBF : null; v.scatter.update(camBF); }
+          if (v.scatter) {
+            v.scatter.site = frame.siteBF && b.name === frame.siteBody ? frame.siteBF : null;
+            // viewing cone in body-fixed axes: half the frustum diagonal plus a margin, so turning a little doesn't rebuild
+            const f = cam.getWorldDirection(_v).applyQuaternion(qi);
+            const half = Math.atan(Math.tan(cam.fov * Math.PI / 360) * Math.hypot(1, cam.aspect)) + 0.45;
+            v.scatter.update(camBF, { fwd: [f.x, f.y, f.z], cos: Math.cos(Math.min(half, Math.PI * 0.95)) });
+          }
         }
         if (b.atmo && (d < b.radius + b.atmo.height * 60 + b.radius * 4 || pix > 6)) {
           atmos.push({ d, body: b, C: [rel.x, rel.y, rel.z], R: b.radius + (b.isGas ? 0 : 0), atmo: b.atmo, w2b, cloudRot: this.cloudRot(b), clouds: this.cloudsFor(b), real2D: b.name === 'Earth' && b.sys.real ? planetTexture(PLANET_EXTRA.Earth.clouds, false) : null });
