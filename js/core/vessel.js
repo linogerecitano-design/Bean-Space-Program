@@ -195,7 +195,8 @@ export class Vessel {
     const pts = [];
     for (const p of this.livingParts()) {
       const [x, y, z] = p.pl.pos; const h = p.part.h || 1, r = p.pl.radius || 0.3;
-      const tol = p.part.legs ? p.part.legs : 6;
+      // touchdown speed a part survives (m/s): capsules and probes are built for parachute landings
+      const tol = p.part.legs ? p.part.legs : p.part.chute ? 40 : p.part.crew || p.part.heatshield || p.part.probe ? 12 : 8;
       if (p.pl.radial) {
         if (p.part.legs) { const a = p.pl.ang; pts.push({ p: [x + Math.cos(a) * (0.5 + h * 0.35), y - h * (p.part.mesh?.f9 ? 1 : 0.95), z - Math.sin(a) * (0.5 + h * 0.35)], tol, leg: true, part: p }); }
         continue;
@@ -329,7 +330,8 @@ export function physicsStep(v, dt, ctx) {
   const rl = r.len(); const up = r.clone().scale(1 / rl);
   const alt = rl - B.radius;
   // --- surface/ground
-  const tH = B.hasSurface ? B.terrainHeightAt(r, ctx.t) : 0;
+  const tG = B.hasSurface ? B.terrainHeightAt(r, ctx.t) : 0; const sea = B.hasSurface ? B.seaLevel : null;
+  const water = sea != null && tG < sea; const tH = water ? sea : tG; // oceans: float on the water, don't sink to the seabed
   // --- forces
   const mkg = v.mass * 1000;
   const ax = new V3().addScaled(r, -B.mu / (rl * rl * rl));
@@ -351,7 +353,7 @@ export function physicsStep(v, dt, ctx) {
     const s = airV.len(); q = 0.5 * rho * s * s;
     if (s > 0.01) {
       const vn = airV.clone().scale(1 / s);
-      const cosA = Math.abs(vn.x * nose.x + vn.y * nose.y + vn.z * nose.z);
+      const cosA = Math.min(1, Math.abs(vn.x * nose.x + vn.y * nose.y + vn.z * nose.z)); // (rounding can push it past 1: sqrt(1-cos²) went NaN)
       let area = v.frontal * cosA + v.height * v.maxR * 2 * Math.sqrt(1 - cosA * cosA) * 0.6;
       let cd = v.cd;
       // parachutes
@@ -407,6 +409,12 @@ export function physicsStep(v, dt, ctx) {
     const kSpring = mkg * 600, cDamp = 2 * Math.sqrt(kSpring * mkg) * 0.9;
     const Fn = new V3(); const T = new THREE.Vector3();
     const comLocal = new THREE.Vector3(...v.com);
+    // the ground's stiffness is shared between the points touching it: summed per point, a capsule resting on
+    // 16 points was so stiff the 20 ms step went unstable and it bounced and spun forever
+    let nIn = 0;
+    for (const c of v.contactPts) { const lp = _v2.set(c.p[0] - comLocal.x, c.p[1] - comLocal.y, c.p[2] - comLocal.z).applyQuaternion(v.q);
+      const px = r.x + lp.x, py = r.y + lp.y, pz = r.z + lp.z; if (R0 + (v.padHeight || 0) - Math.sqrt(px * px + py * py + pz * pz) > 0) nIn++; }
+    const kP = kSpring / Math.max(1, nIn * 0.5), cP = cDamp / Math.max(1, nIn * 0.5);
     for (const c of v.contactPts) {
       const lp = _v2.set(c.p[0] - comLocal.x, c.p[1] - comLocal.y, c.p[2] - comLocal.z).applyQuaternion(v.q);
       const px = r.x + lp.x, py = r.y + lp.y, pz = r.z + lp.z;
@@ -419,11 +427,15 @@ export function physicsStep(v, dt, ctx) {
         const ww = v.w.clone().applyQuaternion(v.q);
         const pv = new V3(vel.x + ww.y * lp.z - ww.z * lp.y, vel.y + ww.z * lp.x - ww.x * lp.z, vel.z + ww.x * lp.y - ww.y * lp.x).sub(surfV);
         const vn = pv.dot(n);
-        impact = Math.max(impact, -vn);
-        if (-vn > c.tol * (v.type === 'eva' ? 2 : 1) && !v.clamped && !ctx.noCrash) { c.part.broken = true; v.crashPart = c.part; }
-        let fn = kSpring * pen - cDamp * vn; if (fn < 0) fn = 0;
+        // breakage: the vessel's own descent speed, plus half of any tipping motion (a capsule rolling onto
+        // its side after touchdown mustn't count as a crash)
+        const vlin = (vel.x - surfV.x) * n.x + (vel.y - surfV.y) * n.y + (vel.z - surfV.z) * n.z;
+        const vhit = -(vlin + (vn - vlin) * 0.5);
+        impact = Math.max(impact, vhit);
+        if (vhit > c.tol * (v.type === 'eva' ? 2 : 1) * (water ? 2.2 : 1) && !v.clamped && !ctx.noCrash) { c.part.broken = true; v.crashPart = c.part; }
+        let fn = kP * pen - cP * vn; if (fn < 0) fn = 0;
         const vt = pv.clone().addScaled(n, -vn); const vtl = vt.len();
-        const fr = vtl > 1e-4 ? Math.min(fn * 0.8, mkg * vtl / dt * 0.25) : 0;
+        const fr = vtl > 1e-4 ? Math.min(fn * 0.8, mkg * vtl / dt * 0.25 / Math.max(1, nIn)) : 0;
         const F = n.clone().scale(fn); if (vtl > 1e-4) F.addScaled(vt, -fr / vtl);
         Fn.add(F);
         T.add(new THREE.Vector3().crossVectors(lp, new THREE.Vector3(F.x, F.y, F.z)));
@@ -432,6 +444,8 @@ export function physicsStep(v, dt, ctx) {
     if (v.contact) {
       vel.addScaled(Fn, dt / mkg);
       applyTorqueWorld(v, T, dt);
+      v.w.multiplyScalar(Math.exp(-dt * (water ? 1.5 : 4))); // rolling resistance / water drag on the hull
+      if (water) { vel.x = surfV.x + (vel.x - surfV.x) * Math.exp(-dt * 0.8); vel.y = surfV.y + (vel.y - surfV.y) * Math.exp(-dt * 0.8); vel.z = surfV.z + (vel.z - surfV.z) * Math.exp(-dt * 0.8); }
       v.lastImpact = impact;
     }
     if (v.crashPart) { v.recalcNeeded = true; }
@@ -489,7 +503,7 @@ function sasInput(v, ctx) {
 export function updateSituation(v, t) {
   const B = v.body; const alt = v.r.len() - B.radius;
   if (v.clamped) v.situation = 'prelaunch';
-  else if (v.landed || v.contact) v.situation = (B.name === 'Earth' || (B.style && B.style.seaLevel != null)) && B.terrainHeightAt(v.r, t) < (B.style?.seaLevel ?? 0) - 0.5 ? 'splashed' : 'landed';
+  else if (v.landed || v.contact) v.situation = (B.name === 'Earth' || (B.style && B.style.seaLevel != null)) && B.seaLevel != null && B.terrainHeightAt(v.r, t) < B.seaLevel - 0.5 ? 'splashed' : 'landed';
   else if (B.atmo && alt < B.atmo.height) v.situation = 'flying';
   else { const o = Orbit.fromState(B.mu, v.r, v.v, t); v.situation = o.e < 1 && o.pe > B.radius + (B.atmo ? B.atmo.height : 0) ? 'orbiting' : o.e >= 1 ? 'escaping' : 'suborbital'; }
   return v.situation;

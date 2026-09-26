@@ -135,8 +135,13 @@ export class Body {
     if (!this.hasSurface) return 0;
     const q = this.rotAt(t).invert();
     const v = new THREE.Vector3(rel.x, rel.y, rel.z).normalize().applyQuaternion(q);
-    return this.surface.height(v.x, v.y, v.z);
+    const h = this.surface.height(v.x, v.y, v.z);
+    return Number.isFinite(h) ? h : 0; // terrain still loading: never let a NaN into the physics
   }
+  // sea level of this body's oceans (null when it has none)
+  get seaLevel() { if (this._sea !== undefined) return this._sea; const st = this.style; return (this._sea = (this.name === 'Earth' && this.sys && this.sys.real) ? 0 : st && st.seaLevel != null && st.oceanFrac !== 0 ? st.seaLevel : null); }
+  // what a vessel rests on: the ground, or the water surface over the oceans
+  surfaceHeightAt(rel, t) { const h = this.terrainHeightAt(rel, t); const sl = this.seaLevel; return sl != null && h < sl ? sl : h; }
   atmoDensity(alt) {
     const a = this.atmo; if (!a || alt > a.height) return 0;
     const P = a.P0 * 1000 * Math.exp(-Math.max(alt, 0) / a.H); // Pa

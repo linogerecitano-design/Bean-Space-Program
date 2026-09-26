@@ -47,7 +47,7 @@ export class FlightScene {
     bakeListeners.add((b, kind) => {
       const v = this.vessel; if (!this.active || !v || kind === 'clouds' || v.body !== b || !v.landed || !v.landedBF) return;
       const bf = v.landedBF, r = Math.hypot(...bf), d = bf.map((x) => x / r);
-      const hgt = b.surface ? b.surface.height(d[0], d[1], d[2]) : 0;
+      let hgt = b.surface ? b.surface.height(d[0], d[1], d[2]) : 0; if (b.seaLevel != null) hgt = Math.max(hgt, b.seaLevel);
       const off = v.type === 'eva' ? 0.92 : (v.com[1] - v.bottom + 0.3);
       v.landedBF = d.map((x) => x * (b.radius + hgt + off)); this.syncLanded(v, this.G.t);
     });
@@ -128,7 +128,7 @@ export class FlightScene {
   // set a vessel down upright on a body's surface at lat/lon (degrees)
   landAt(v, body, lat, lon, extra = 0) {
     if (this.lfx) this.lfx.clear(); // launch smoke and frost stay at the pad
-    const d = latLonToDir(lat, lon); const hgt = body.surface ? body.surface.height(...d) : 0;
+    const d = latLonToDir(lat, lon); let hgt = body.surface ? body.surface.height(...d) : 0; if (body.seaLevel != null) hgt = Math.max(hgt, body.seaLevel);
     const hCom = v.com[1] - v.bottom + 0.3 + extra + Math.max(hgt, body.name === 'Earth' ? 0 : -1e9);
     const bf = [d[0] * (body.radius + hCom), d[1] * (body.radius + hCom), d[2] * (body.radius + hCom)];
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...d));
@@ -373,7 +373,7 @@ export class FlightScene {
     const m = new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(up, inward).normalize(), up, inward);
     e.q.setFromRotationMatrix(m);
     if (v.landed || v.contact) {
-      const upr = e.r.clone().norm(); const hgt = v.body.terrainHeightAt(e.r, G.t); e.r = upr.scale(v.body.radius + hgt + 0.92);
+      const upr = e.r.clone().norm(); const hgt = v.body.surfaceHeightAt(e.r, G.t); e.r = upr.scale(v.body.radius + hgt + 0.92);
       e.q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(upr.x, upr.y, upr.z)); this.lockLanded(e, G.t); e.landed = true;
     } else e.grab = { ship: v.id, local: hatch.local.toArray(), qRel: v.q.clone().invert().multiply(e.q).toArray() };
     e.suited = true;
@@ -759,7 +759,7 @@ export class FlightScene {
     dir.normalize();
     const step = dir.clone().multiplyScalar(speed * Math.min(dt, 0.5));
     const np = v.r.clone().add(new V3(step.x, step.y, step.z));
-    const hgt = B.terrainHeightAt(np, G.t); const nu = np.clone().norm();
+    const hgt = B.surfaceHeightAt(np, G.t); const nu = np.clone().norm();
     v.r = nu.clone().scale(B.radius + hgt + 0.92);
     const qUp = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(nu.x, nu.y, nu.z));
     const look = new THREE.Vector3(0, 0, 1).applyQuaternion(qUp); const ang = Math.atan2(new THREE.Vector3().crossVectors(look, dir).dot(new THREE.Vector3(nu.x, nu.y, nu.z)), look.dot(dir));
@@ -871,7 +871,7 @@ export class FlightScene {
       if (d.body.atmo) { const alt = rl - d.body.radius; const rho = d.body.atmoDensity(alt); const air = d.v.clone().sub(d.body.surfaceVel(d.r)); const s = air.len(); if (s > 0) d.v.addScaled(air, -0.5 * rho * s * 0.01 * dt); }
       d.r.addScaled(d.v, dt);
       const wl = d.w.length(); if (wl > 0) d.q.multiply(_q.setFromAxisAngle(_v.copy(d.w).divideScalar(wl), wl * dt));
-      const hgt = d.body.hasSurface ? d.body.terrainHeightAt(d.r, G.t) : 0;
+      const hgt = d.body.hasSurface ? d.body.surfaceHeightAt(d.r, G.t) : 0;
       if (rl < d.body.radius + hgt) { this.explosion(d.r.clone(), d.body, 10); d.dead = true; }
       if (d.age > 600 || d.r.dist(this.vessel.r) > 200e3) d.dead = true;
     }
@@ -917,7 +917,7 @@ export class FlightScene {
     camPos = focus.clone().add(new V3(off.x, off.y, off.z));
     // don't go underground
     if (!this.mapMode && v.body.hasSurface) {
-      const rel = camPos.clone().sub(v.body.posAt(G.t)); const hgt = v.body.terrainHeightAt(rel, G.t) + v.body.radius + 1.5;
+      const rel = camPos.clone().sub(v.body.posAt(G.t)); const hgt = v.body.surfaceHeightAt(rel, G.t) + v.body.radius + 1.5;
       if (rel.len() < hgt) { camPos = v.body.posAt(G.t).clone().add(rel.norm().scale(hgt)); }
     }
     focusRel.set(vp.x - camPos.x, vp.y - camPos.y, vp.z - camPos.z);
@@ -1036,7 +1036,7 @@ export class FlightScene {
       this.stageHUD(); return;
     }
     const B = v.body; const alt = v.r.len() - B.radius;
-    const radar = B.hasSurface ? alt - B.terrainHeightAt(v.r, G.t) : alt;
+    const radar = B.hasSurface ? alt - B.surfaceHeightAt(v.r, G.t) : alt;
     const up = v.r.clone().norm(); const surfV = v.v.clone().sub(B.surfaceVel(v.r));
     const vs = v.v.dot(up);
     const orbitalMode = alt > (B.atmo ? B.atmo.height : 30000);
