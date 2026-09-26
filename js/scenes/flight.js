@@ -600,7 +600,7 @@ export class FlightScene {
     const lead = (p) => { const h = p.part.h || 1, y0 = p.pl.pos[1] - h, y1 = p.pl.pos[1]; return Math.max(y0 * f.y, y1 * f.y) + p.pl.pos[0] * f.x + p.pl.pos[2] * f.z + (p.part.d || 1) * 0.5 * Math.sqrt(Math.max(0, 1 - f.y * f.y)); };
     let sMax = -Infinity, leader = null; for (const p of parts) { const s = lead(p); p._s = s; if (s > sMax) { sMax = s; leader = p; } }
     const shield = parts.find(p => p.part.heatshield && sMax - p._s < 0.6);
-    const shielded = shield && Math.abs(f.y) > 0.82; // the shield only works while it faces the flow
+    const shielded = shield && f.y < -0.82; // shields sit on a capsule's base: they only work travelling base-first
     const L = 1.2 * (v.maxR || 1) + 0.8;
     let lost = null;
     for (const p of parts) {

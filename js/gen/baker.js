@@ -66,6 +66,7 @@ function paramsFor(body, recipe) {
     crackColor: c.crack, polar: icyPolar, iceCaps: st.iceCaps, Teq: body.Teq, starTemp: body.sys.star.temp || 5772, locked: !!body.locked,
     gravity: body.mu / body.radius ** 2, oceanFrac: st.oceanFrac, clouds: !!st.clouds, cloudAmount: st.clouds ? st.clouds.coverage : 0, ocean: c.ocean,
     faculae: st.faculae || 0, icePatches: st.icePatches || 0, scarps: !!st.scarps, forming: !!st.forming, cls: body.class || null,
+    craters: st.craters ?? null, volcanic: st.volcanic || 0, cracks: st.cracks || 0, grooves: st.grooves || 0,
   };
 }
 

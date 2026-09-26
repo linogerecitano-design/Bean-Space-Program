@@ -149,14 +149,14 @@ export function makePlasma() {
           vec3 qw = q + vec3(w.x, 0.0, w.y) * 1.4;
           float n = (snoise(qw) * 0.55 + snoise(qw * 2.1 + 3.3) * 0.3 + snoise(qw * 4.4 + 9.1) * 0.15) * 0.5 + 0.5;
           // shock layer: thin and hottest where the surface faces the flow
-          float layer = exp(-max(sd, 0.0) / (0.025 + 0.04 * max(wind, 0.0) + 0.02 * n)) * smoothstep(-0.2, 0.9, wind);
+          float layer = exp(-max(sd, 0.0) / (uRad * (0.12 + 0.2 * max(wind, 0.0)) * (0.7 + 0.6 * n))) * smoothstep(0.0, 0.9, wind) * (0.5 + 0.9 * n);
           // flame envelope: hugs the sides, then a widening, flickering wake behind the vessel
           float env = uRad * (1.15 + 0.3 * n) + aft * (0.22 + 0.25 * n);
           float sheath = smoothstep(env, env * 0.55, max(rho, sd + uRad)) * smoothstep(-0.3, 0.2, -wind + aft);
           float tongues = pow(n, 2.2) * (1.0 + 1.5 * smoothstep(0.55, 0.9, n));
           float wake = sheath * tongues * exp(-aft * (0.55 - 0.25 * uK));
           float T = clamp(0.35 + 0.65 * uK - aft * 0.18 + (n - 0.5) * 0.3, 0.0, 1.0);
-          vec3 e = fire(clamp(0.75 + 0.25 * uK, 0.0, 1.0)) * layer * (3.0 + 4.0 * uK)
+          vec3 e = fire(clamp(0.5 + 0.35 * uK + 0.15 * n, 0.0, 1.0)) * layer * (1.2 + 2.2 * uK)
                  + fire(T) * wake * (1.6 + 2.0 * uK)
                  + vec3(0.55, 0.3, 1.0) * layer * smoothstep(0.6, 1.0, uK) * 0.8;   // ionised air glow
           col += e * dt;

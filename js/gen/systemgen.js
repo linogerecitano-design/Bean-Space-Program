@@ -25,9 +25,9 @@ export function styleFor(cls, r, T) {
       else if (comp < 0.7) c = [[0.5, 0.36, 0.28], [0.62, 0.46, 0.35], [0.74, 0.6, 0.48]];              // iron-oxide red
       else if (comp < 0.84) c = [[0.36, 0.34, 0.31], [0.48, 0.46, 0.43], [0.62, 0.6, 0.57]];           // dark carbonaceous (brighter ejecta)
       else c = [[0.5, 0.47, 0.42], [0.63, 0.6, 0.55], [0.78, 0.75, 0.7]];                               // bright anorthosite highlands
-      return { kind: 'rocky', colors: { low: pal(r, c[0], 0.06), mid: pal(r, c[1], 0.06), high: pal(r, c[2], 0.05) }, relief: 5000, craters: 0.7 + r() * 0.3, maria: r() * 0.6, rays: r() * 0.6, detail: 'airless', ...extra };
+      return { kind: 'rocky', colors: { low: pal(r, c[0], 0.06), mid: pal(r, c[1], 0.06), high: pal(r, c[2], 0.05) }, relief: 5000, craters: r() < 0.4 ? 0.08 + r() * 0.35 : 0.6 + r() * 0.4, maria: r() * 0.6, rays: r() * 0.6, volcanic: r() < 0.35 ? r() * 0.8 : 0, detail: 'airless', ...extra };
     }
-    case 'scorched': return { kind: 'rocky', colors: { low: pal(r, [0.36, 0.33, 0.31], 0.08), mid: pal(r, [0.5, 0.46, 0.42], 0.08), high: pal(r, [0.64, 0.6, 0.55], 0.06) }, relief: 6000, craters: 0.6, detail: 'airless', scarps: true };
+    case 'scorched': return { kind: 'rocky', colors: { low: pal(r, [0.36, 0.33, 0.31], 0.08), mid: pal(r, [0.5, 0.46, 0.42], 0.08), high: pal(r, [0.64, 0.6, 0.55], 0.06) }, relief: 6000, craters: 0.3 + r() * 0.65, detail: 'airless', scarps: true };
     case 'iron': return { kind: 'rocky', colors: { low: pal(r, [0.3, 0.3, 0.31], 0.04), mid: pal(r, [0.42, 0.42, 0.43], 0.04), high: pal(r, [0.56, 0.55, 0.55], 0.04) }, relief: 7000, craters: 0.5, detail: 'airless', metallic: true };
     case 'carbon': return { kind: 'rocky', colors: { low: pal(r, [0.08, 0.07, 0.07], 0.03), mid: pal(r, [0.16, 0.14, 0.13], 0.04), high: pal(r, [0.3, 0.27, 0.24], 0.05) }, relief: 6000, craters: 0.3, dunes: 0.5, detail: 'desert' };
     case 'molten': return { kind: 'rocky', colors: { low: [0.06, 0.05, 0.05], mid: [0.12, 0.1, 0.09], high: [0.22, 0.2, 0.18] }, relief: 4000, craters: 0.02, lava: 1, volcanic: 1, forming: true };

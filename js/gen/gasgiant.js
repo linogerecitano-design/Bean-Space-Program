@@ -285,13 +285,29 @@ export function giantParams(body) {
     P.smallCount = Math.floor(r() * 24);
     // its own palette (the presets only lend their flow character), and a much wider spread of band
     // structure, jets, turbulence and haze so no two giants read alike
-    if (name !== 'Toxic Alien') grad = proceduralGradient(r, body.class);
+    // archetype: how the atmosphere is organised, independent of its colour. Jupiter-like: sharp,
+    // high-contrast belts and zones with many storms; Saturn-like: many fine, low-contrast bands under a
+    // thick haze; Uranus-like: nearly featureless, a few faint bands; Neptune-like: few strong bands, dark spots
+    const pick = (tbl) => { let x = r(), acc = 0; for (const [k, w] of tbl) { acc += w; if (x < acc) return k; } return tbl[0][0]; };
+    const ARCH = { jovian: [['jupiter', 0.5], ['saturn', 0.4], ['uranus', 0.1]], sudarsky2: [['saturn', 0.5], ['uranus', 0.3], ['jupiter', 0.2]],
+      sudarsky3: [['neptune', 0.5], ['uranus', 0.5]], icegiant: [['uranus', 0.5], ['neptune', 0.5]], minineptune: [['uranus', 0.6], ['neptune', 0.4]],
+      hotjupiter: [['jupiter', 0.7], ['saturn', 0.3]] };
+    const arch = pick(ARCH[body.class] || ARCH.jovian); P.archetype = arch;
     const u = (a, b) => a + (b - a) * r();
-    P.bandCount = Math.round(u(body.class === 'icegiant' || body.class === 'minineptune' ? 3 : 6, body.class === 'jovian' ? 30 : 16));
-    P.bandContrast = u(0.18, 0.8); P.bandSharp = u(0.6, 2.8); P.bandIrreg = u(0.12, 0.5); P.bandWobble = u(0.2, 0.8); P.bandVariety = u(0.1, 0.35);
-    P.zonal = u(0.6, 1.3); P.turb = u(0.2, 1.0); P.turbScale = u(1.6, 3.8); P.eddyAspect = u(1.8, 6.0); P.evolve = u(0.2, 0.55);
-    P.detailAmp = u(0.12, 0.32); P.detailAniso = u(2.0, 5.0); P.warpAmt = u(0.25, 0.65); P.filament = u(0.03, 0.2); P.wisp = u(0.04, 0.16);
-    P.hazeAmt = u(0.1, 0.7); P.hazeThresh = u(0.45, 0.62); P.hazeAniso = u(2, 5);
+    const A = {
+      jupiter: { bands: [12, 30], con: [0.45, 0.8], sharp: [1.5, 2.8], turb: [0.5, 1.0], haze: [0.2, 0.45], det: [0.18, 0.32], fil: [0.08, 0.2], small: [8, 24], spots: [1, 4], ramp: 1 },
+      saturn:  { bands: [16, 32], con: [0.14, 0.34], sharp: [0.8, 1.4], turb: [0.2, 0.45], haze: [0.5, 0.8], det: [0.08, 0.16], fil: [0.02, 0.07], small: [0, 5], spots: [0, 1], ramp: 0.55 },
+      uranus:  { bands: [3, 7], con: [0.05, 0.2], sharp: [0.6, 1.0], turb: [0.1, 0.3], haze: [0.6, 0.85], det: [0.04, 0.1], fil: [0.0, 0.03], small: [0, 2], spots: [0, 0], ramp: 0.3 },
+      neptune: { bands: [5, 11], con: [0.4, 0.7], sharp: [1.0, 2.0], turb: [0.4, 0.8], haze: [0.3, 0.5], det: [0.16, 0.28], fil: [0.06, 0.14], small: [3, 8], spots: [1, 2], ramp: 0.8 },
+    }[arch];
+    if (name !== 'Toxic Alien') grad = proceduralGradient(r, body.class, A.ramp);
+    P.bandCount = Math.round(u(...A.bands)); P.bandContrast = u(...A.con); P.bandSharp = u(...A.sharp); P.bandIrreg = u(0.12, 0.45); P.bandWobble = u(0.2, 0.7); P.bandVariety = u(0.08, 0.3) * (A.ramp + 0.3);
+    P.zonal = u(0.6, 1.3); P.turb = u(...A.turb); P.turbScale = u(1.6, 3.8); P.eddyAspect = u(1.8, 6.0); P.evolve = u(0.2, 0.55);
+    P.detailAmp = u(...A.det); P.detailAniso = u(2.0, 5.0); P.warpAmt = u(0.2, 0.6) * (0.5 + A.ramp * 0.5); P.filament = u(...A.fil); P.wisp = u(0.02, 0.14) * A.ramp;
+    P.hazeAmt = u(...A.haze); P.hazeThresh = u(0.44, 0.6); P.hazeAniso = u(2, 5); P.hazeSoft = u(0.1, 0.2);
+    P.smallCount = Math.round(u(...A.small));
+    const nsp = Math.round(u(A.spots[0], A.spots[1] + 0.49)); P.spots = P.spots.slice(0, nsp);
+    if (arch === 'neptune') for (const sp of P.spots) sp.color = '#0b1a38';
     const top = hex2rgb(grad[grad.length - 1][1]), bot = hex2rgb(grad[0][1]);
     const hx = (c) => '#' + c.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
     P.hazeColor = hx(top.map(v => v * 0.6 + 0.38)); P.poleColor = hx(bot.map((v, i) => v * 0.7 + top[i] * 0.3)); P.poleAmt = u(0.1, 0.5);
@@ -311,17 +327,17 @@ function hsl2hex(h, s, l) {
 // belts, water-cloud giants bright white-grey, cloudless ones azure, hot ones dark maroon/charcoal,
 // ice giants cyan to deep blue. Each planet draws its own hue, saturation and lightness ramp.
 const FAMILIES = {
-  jovian:      { hue: [22, 42], sat: [0.25, 0.55], lo: [0.22, 0.4], hi: [0.86, 0.95], accents: [[12, 0.55], [35, 0.35], [200, 0.12], [48, 0.4]] },
+  jovian:      { hue: [22, 42], sat: [0.18, 0.42], lo: [0.2, 0.36], hi: [0.86, 0.95], accents: [[12, 0.55], [35, 0.35], [200, 0.12], [48, 0.4]] },
   sudarsky2:   { hue: [200, 230], sat: [0.05, 0.18], lo: [0.45, 0.62], hi: [0.92, 0.98], accents: [[40, 0.12], [210, 0.2]] },
   sudarsky3:   { hue: [205, 225], sat: [0.45, 0.7], lo: [0.18, 0.3], hi: [0.7, 0.85], accents: [[190, 0.4], [240, 0.35]] },
   hotjupiter:  { hue: [0, 22], sat: [0.25, 0.55], lo: [0.06, 0.12], hi: [0.4, 0.58], accents: [[30, 0.6], [340, 0.3], [0, 0.0]] },
   icegiant:    { hue: [175, 225], sat: [0.3, 0.6], lo: [0.2, 0.4], hi: [0.82, 0.93], accents: [[160, 0.3], [230, 0.45], [195, 0.15]] },
   minineptune: { hue: [150, 215], sat: [0.12, 0.35], lo: [0.4, 0.55], hi: [0.86, 0.94], accents: [[45, 0.15], [260, 0.18]] },
 };
-function proceduralGradient(r, cls) {
+function proceduralGradient(r, cls, ramp = 1) {
   const F = FAMILIES[cls] || FAMILIES.jovian;
   const rr = (a) => a[0] + (a[1] - a[0]) * r();
-  const hue = rr(F.hue), sat = rr(F.sat), lo = rr(F.lo), hi = rr(F.hi);
+  const hue = rr(F.hue), sat = rr(F.sat) * (0.6 + 0.4 * ramp), hi = rr(F.hi), lo = hi - (hi - rr(F.lo)) * ramp; // hazy archetypes have a narrow, soft range
   const n = 6 + Math.floor(r() * 4), stops = [];
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1);

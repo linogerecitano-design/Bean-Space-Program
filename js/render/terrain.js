@@ -133,7 +133,7 @@ export function makeTerrainMaterial(body) {
     uNight: { value: extra.night ? planetTexture(extra.night) : blankTex }, uHasNight: { value: extra.night ? 1 : 0 },
     uClouds: { value: extra.clouds && body.name === 'Earth' ? planetTexture(extra.clouds, false) : body.cloudStack ? body.cloudStack.tex : blankTex }, uHasClouds: { value: (extra.clouds && body.name === 'Earth') || body.cloudStack ? 1 : 0 },
     uCloudRot: { value: 0 }, uEarthLike: { value: earthLike ? 1 : 0 }, uRadius: { value: body.radius }, uLava: { value: body.style?.lava || 0 },
-    uDetailFade: { value: IS_MOBILE ? 3000 : 7000 }, uSiteDir: { value: new THREE.Vector3(0, 0, 0) }, uSiteR: { value: 0 }, uLonOff: { value: macro.real && body.name === 'Pluto' ? 0.5 : 0 }, uSunI: { value: 3 }, uCrater: { value: ['airless', 'icy'].includes(body.surface?.detailType) ? 1 : 0 }, uHeightTex: { value: blankTex }, uHasHeight: { value: 0 }, uHTexel: { value: new THREE.Vector2(1, 1) },
+    uDetailFade: { value: IS_MOBILE ? 3000 : 7000 }, uSiteDir: { value: new THREE.Vector3(0, 0, 0) }, uSiteR: { value: 0 }, uLonOff: { value: macro.real && body.name === 'Pluto' ? 0.5 : 0 }, uSunI: { value: 3 }, uCrater: { value: (['airless', 'icy'].includes(body.surface?.detailType) ? 1 : 0) ? Math.max(0.15, Math.min(1, body.style?.craters ?? 0.5)) : 0 }, uHeightTex: { value: blankTex }, uHasHeight: { value: 0 }, uHTexel: { value: new THREE.Vector2(1, 1) },
   };
   const ht = heightTexture(body); if (ht) { U.uHeightTex.value = ht; U.uHasHeight.value = 1; U.uHTexel.value.set(1 / ht.image.width, 1 / ht.image.height); }
   mat.userData.U = U;
@@ -168,10 +168,19 @@ export function makeTerrainMaterial(body) {
           ivec3 mi = (a.x<a.y && a.x<a.z) ? ivec3(0,1,2) : (a.y<a.z) ? ivec3(1,2,0) : ivec3(2,0,1);
           ivec3 me = ivec3(3) - mi - ma;
           vec2 uvA = vec2(p[ma.y], p[ma.z]) / scale, uvB = vec2(p[me.y], p[me.z]) / scale;
-          if (parallax > 0.0) { // offset mapping on the main plane
-            float hh = texture(uGroundN, vec3(uvA, layer)).a;
-            vec2 vd = vec2(viewBF[ma.y], viewBF[ma.z]) / max(abs(viewBF[ma.x]), 0.25);
-            uvA -= vd * (hh - 0.5) * 0.06 * parallax;
+          if (parallax > 0.0) {
+            // parallax occlusion mapping on the main plane: march the view ray down through the height
+            // field (stored in the normal map's alpha) so pebbles, cracks and clods read as real relief
+            vec2 gx = dFdx(uvA), gy = dFdy(uvA);
+            float vz = max(viewBF[ma.x] * sign(n[ma.x]), 0.22);
+            vec2 dir = vec2(viewBF[ma.y], viewBF[ma.z]) / vz;
+            const int PSTEPS = ${IS_MOBILE ? 6 : 10};
+            vec2 duv = -dir * (0.075 * parallax) / float(PSTEPS);
+            float dl = 1.0 / float(PSTEPS), d = 0.0; vec2 uv = uvA;
+            float depth = 1.0 - textureGrad(uGroundN, vec3(uv, layer), gx, gy).a;
+            for (int i = 0; i < PSTEPS; i++) { if (d >= depth) break; uv += duv; d += dl; depth = 1.0 - textureGrad(uGroundN, vec3(uv, layer), gx, gy).a; }
+            vec2 prev = uv - duv; float after = depth - d, before = (1.0 - textureGrad(uGroundN, vec3(prev, layer), gx, gy).a) - (d - dl);
+            uvA = mix(uv, prev, clamp(after / (after - before + 1e-5), 0.0, 1.0));
           }
           vec2 w = vec2(a[ma.x], a[me.x]); w = clamp((w - 0.5773) / (1.0 - 0.5773), 0.0, 1.0); w = pow(w, vec2(4.0)); w /= (w.x + w.y + 1e-5);
           alb = texture(uGroundA, vec3(uvA, layer)) * w.x + texture(uGroundA, vec3(uvB, layer)) * w.y;
@@ -180,6 +189,7 @@ export function makeTerrainMaterial(body) {
           vec3 tA = vec3(0.0); tA[ma.y] = nA.x*2.0-1.0; tA[ma.z] = nA.y*2.0-1.0;
           vec3 tB = vec3(0.0); tB[me.y] = nB.x*2.0-1.0; tB[me.z] = nB.y*2.0-1.0;
           nrm = vec4(tA * w.x + tB * w.y, nA.a * w.x + nB.a * w.y);
+          alb.rgb *= mix(0.8, 1.04, nrm.a); // crevices between stones and clods catch less light
         }
         float lum(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
         float h31(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
@@ -190,7 +200,7 @@ export function makeTerrainMaterial(body) {
         // their own cell, so only the home cell needs testing.
         vec3 craterGrad(vec3 q){
           vec3 c = floor(q); float h = h31(c + 17.0);
-          if (h > 0.42) return vec3(0.0);
+          if (h > 0.12 + 0.3 * uCrater) return vec3(0.0); // fewer small craters on younger surfaces
           vec3 ctr = c + 0.5 + (vec3(h31(c + 3.1), h31(c + 7.7), h31(c + 11.3)) - 0.5) * 0.46;
           float rad = 0.06 + 0.2 * h31(c + 5.9) * h31(c + 9.4);
           vec3 d = q - ctr; float r = length(d) / rad; if (r > 1.0) return vec3(0.0);
@@ -241,17 +251,21 @@ export function makeTerrainMaterial(body) {
             g += gg * (k == 0 ? 1.0 - fb : fb);
           }
           g -= dirBF * dot(g, dirBF);
-          float bumpK = (uEarthLike > 0.5 ? 0.12 : uCrater > 0.5 ? 0.08 : 0.16) * smoothstep(uDetailFade * 0.5, uDetailFade * 1.5, vCamDist);
+          float bumpK = (uEarthLike > 0.5 ? 0.12 : mix(0.16, 0.08, uCrater)) * smoothstep(uDetailFade * 0.5, uDetailFade * 1.5, vCamDist);
           vec3 cg = vec3(0.0);
-          if (uCrater > 0.5) {
-            // craters from ~feature size up to 8x that, so new ones keep resolving as you descend
+          if (uCrater > 0.01) {
+            // craters from ~feature size up to 8x that, so new ones keep resolving as you descend. Each
+            // octave's pattern is keyed to its absolute size (o0 + k), not its slot, so craters stay put
+            // as octaves shift while zooming (keying by slot made them jump to new positions).
             for (int k = 0; k < 4; k++) {
-              float sc = exp2(o0 + float(k)) * 2.0; float wk = k == 0 ? 1.0 - fb : k == 3 ? fb : 1.0;
-              cg += craterGrad(bp / sc + vec3(0.37, 0.71, 0.13) * float(k + 1)) * wk;
+              float oct = o0 + float(k);
+              float sc = exp2(oct) * 2.0; float wk = k == 0 ? 1.0 - fb : k == 3 ? fb : 1.0;
+              vec3 off = fract(vec3(0.37, 0.71, 0.13) * oct + vec3(0.11, 0.53, 0.29) * oct * oct * 0.01) * 97.0;
+              cg += craterGrad(bp / sc + off) * wk;
             }
             cg -= dirBF * dot(cg, dirBF);
           }
-          nGeo = normalize(nGeo - g * bumpK - cg * 0.9);
+          nGeo = normalize(nGeo - g * bumpK - cg * 0.9 * uCrater);
         }
         float slope = 1.0 - dot(nGeo, dirBF);
         vec3 nBF = nGeo;
@@ -269,7 +283,7 @@ export function makeTerrainMaterial(body) {
           if (uEarthLike > 0.5) { l1 = green > 0.5 ? (bright < 0.13 ? uPal.y : uPal.x) : (sandy > 0.5 ? uPal4 : uPal.z); l2 = cliff > 0.5 ? uPal.z : (snow > 0.3 ? uPal.w : uPal.y); m = max(cliff, snow); if (green > 0.5 && cliff < 0.5 && snow < 0.3) { l2 = uPal.y; m = smoothstep(0.2, 0.1, bright) ; } }
           else { l1 = uPal.x; l2 = cliff > 0.3 ? uPal.z : (snow > 0.3 ? uPal.w : uPal.y); m = max(cliff, max(snow, smoothstep(0.35, 0.65, n1) * 0.7)); }
           vec3 viewBF = normalize(transpose(uBFtoView) * vec3(0.0, 0.0, 1.0));
-          float par = 1.0 - smoothstep(10.0, 40.0, vCamDist);
+          float par = 1.0 - smoothstep(25.0, 70.0, vCamDist);
           vec4 a1, n1v, a2, n2v, a3, n3v, a4, n4v;
           groundSample(l1, vT1, nGeo, 4.0, a1, n1v, viewBF, par);
           groundSample(l2, vT1, nGeo, 4.0, a2, n2v, viewBF, par);

@@ -236,6 +236,14 @@ export class Surface {
     h += this.fineDetail(x, y, z, lod, R / 250, h);
     return h;
   }
+  // continents / mountains only (no craters or fine detail): drives surface colour
+  macroHeight(x, y, z) {
+    const n = this.n, relief = this.relief;
+    const cont = n.warped(x * 1.4, y * 1.4, z * 1.4, 5, 0.7);
+    const mountains = n.ridged(x * 3.5, y * 3.5, z * 3.5, 6);
+    const mMask = sstep(-0.1, 0.4, n.fbm(x * 1.1 + 5, y * 1.1, z * 1.1, 3));
+    return relief * (0.5 * cont + 0.55 * (mountains - 0.35) * mMask);
+  }
   // Procedural detail below a cut-off scale: crater populations on airless worlds (fresh bowls,
   // degraded pits, flat floors, central peaks), eroded ridges on terrestrials, mesas and buttes on
   // deserts, fractures on icy crusts. More appears the closer the camera gets (via lod).
@@ -252,7 +260,16 @@ export class Surface {
       const amp = s * (t === 'terra' ? 0.05 : t === 'desert' ? 0.04 : t === 'icy' ? 0.025 : 0.035) * reliefK;
       h += w * amp * (t === 'terra' || t === 'desert' ? n.ridged(x * f, y * f, z * f, 1) - 0.4 : n.n(x * f, y * f, z * f));
     }
-    if (t === 'airless' || t === 'icy') h += this.craterField(x, y, z, lod, maxScale, t === 'icy' ? 0.7 : 1);
+    // crater density follows the world's age: young, resurfaced crusts get few; old ones stay saturated.
+    // Between the craters: rolling hills and ridges that keep sharpening as you descend
+    const cAmt = Math.max(0.05, Math.min(1, this.style.craters ?? 0.5));
+    if (t === 'airless' || t === 'icy') {
+      h += this.craterField(x, y, z, lod, maxScale, (t === 'icy' ? 0.7 : 1) * (0.25 + 0.75 * cAmt));
+      for (let s = maxScale, k = 0; s > lod * 0.8 && k < 10; s *= 0.5, k++) {
+        const w = band(s); if (!w) continue; const f = R / s;
+        h += w * s * 0.03 * reliefK * (1.2 - cAmt) * (n.ridged(x * f + 17, y * f, z * f, 1) - 0.45);
+      }
+    }
     if (t === 'icy') { const f = R / Math.max(maxScale * 0.3, lod * 8); if (R / f > lod * 2) h -= 30 * reliefK * Math.pow(1 - Math.abs(this.n2.n(x * f, y * f, z * f)), 18); }
     if (t === 'desert' && (this.style.mesas ?? true)) {
       // terraced plateaus: caprock layers eroding into mesas, buttes and canyons
@@ -404,7 +421,9 @@ export class Surface {
     const R = this.R;
     let water = 0;
     if (this.kind === 'earth' || this.kind === 'terra') return this.earthColor(x, y, z, h, slope);
-    const rel = this.kind === 'asteroid' ? h / (R * 0.1) : h / (this.relief || 1);
+    // brightness follows the large-scale terrain; crater floors are not darker than their surroundings
+    const hc = this.kind === 'asteroid' || this.hmap ? h : this.macroHeight(x, y, z);
+    const rel = this.kind === 'asteroid' ? hc / (R * 0.1) : hc / (this.relief || 1);
     const t = sstep(-0.6, 0.8, rel + 0.25 * n.fbm(x * 8 + 3, y * 8, z * 8, 3));
     if (t < 0.5) mix3(o, c.low, c.mid, t * 2); else mix3(o, c.mid, c.high, (t - 0.5) * 2);
     const v = 0.9 + 0.2 * n.fbm(x * 30, y * 30, z * 30, 3);

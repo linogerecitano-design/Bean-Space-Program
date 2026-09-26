@@ -15,7 +15,7 @@ import { hydraulicErode, carveCanyons, thermalErode } from './kalileo/terrain.js
 import { buildTerrestrialColor, percentileSeaField } from './kalileo/terrestrial.js';
 import { buildCloudStack } from './kalileo/cloudstack.js';
 
-export const BAKE_VERSION = 6;
+export const BAKE_VERSION = 7;
 const TAU = Math.PI * 2;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -90,16 +90,43 @@ async function bakeMoon(p, report) {
     if (dicho) v += dicho * Math.tanh((x * dd[0] + y * dd[1] + z * dd[2]) * 3);
     field[i] = v;
   });
+  // How battered vs. how alive: dead crusts are saturated with craters; geologically active worlds were
+  // resurfaced (lava / cryolava plains) and show mountains, volcanoes, rilles, grooves and lineae instead.
+  const rg = mulberry32(seed * 104729 + 71);
+  const craterAmt = clamp01(p.craters ?? (0.25 + 0.75 * rg()));
+  const act = clamp01(1 - craterAmt + (p.volcanic || 0) * 0.5 + (p.cracks || 0) * 0.25 + (p.grooves || 0) * 0.3);
+  const sim3 = new Simplex3(seed + 31), sim4 = new Simplex3(seed + 32);
+  report('Raising mountains and hills', 0.1);
+  // mountain belts along a few great circles (compressional ranges), plus rolling hills everywhere
+  const belts = []; const nBelts = act > 0.25 ? 1 + Math.floor(rg() * 3) : rg() < 0.4 ? 1 : 0;
+  for (let k = 0; k < nBelts; k++) { const a = randDir(rg), b = randDir(rg); const n = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; const nl = Math.hypot(...n); belts.push({ n: n.map(v => v / nl), a, w: 0.08 + rg() * 0.12, len: 0.3 + rg() * 0.9, hgt: (0.03 + rg() * 0.05) * (0.4 + act) }); }
+  const hillAmp = 0.012 + 0.02 * act;
+  forEachDir(w, h, (i, x, y, z) => {
+    let add = hillAmp * sim3.fbm(x * 9, y * 9, z * 9, { octaves: 5 });
+    for (const B of belts) {
+      const d = x * B.n[0] + y * B.n[1] + z * B.n[2]; const al = x * B.a[0] + y * B.a[1] + z * B.a[2]; if (al < 1 - B.len * 2) continue;
+      const wd = B.w * (0.7 + 0.5 * sim4.noise(x * 3, y * 3, z * 3));
+      const m = Math.exp(-(d * d) / (wd * wd)) * sstep(1 - B.len * 2, 1 - B.len * 1.2, al);
+      if (m > 0.01) add += B.hgt * m * Math.pow(Math.max(0, sim4.fbm(x * 14, y * 14, z * 14, { octaves: 6, ridged: true })), 1.5);
+    }
+    field[i] += add;
+  });
+  if (nBelts) features.push(nBelts > 1 ? 'Mountain belts' : 'A great mountain range');
+  // volcanoes / cryovolcanic domes on active worlds
+  const nVolc = act > 0.35 ? Math.floor(act * (icy ? 4 : 9) * (0.5 + rg())) : 0;
+  for (let k = 0; k < nVolc; k++) { const lat = Math.asin(rg() * 1.6 - 0.8), lon = rg() * TAU - Math.PI; stampCone(field, w, h, lat, lon, 0.03 + rg() * 0.09, (icy ? 0.02 : 0.05) * (0.5 + rg()), 0.1 + rg() * 0.12, icy ? 1.0 : 1.6); }
+  if (nVolc) features.push(icy ? 'Cryovolcanic domes' : nVolc > 4 ? 'Shield volcano provinces' : 'Shield volcanoes');
   const preCrater = Float32Array.from(field);
+  const baseField = preCrater; // colour follows the terrain, not the craters (crater floors are not darker)
   await tick();
-  report('Heavy bombardment (crater saturation)', 0.15);
-  const lunarO = { ...LUNAR_DEFAULTS, seed: seed + 3, saturation: 0.3 + 0.65 * age, saturationLargest: 3 + rng() * 6,
-    youngCraters: Math.round(3 + rng() * 12), rayBrightness: icy ? 0.35 : 0.5 + rng() * 0.3, specks: Math.round(18000 * (w / 1024) ** 2),
-    mottling: 0.2 + rng() * 0.2, rayColor: icy ? '#f4f8ff' : '#e8e4dc' };
+  report(craterAmt > 0.5 ? 'Heavy bombardment (crater saturation)' : 'Light cratering', 0.15);
+  const lunarO = { ...LUNAR_DEFAULTS, seed: seed + 3, saturation: (0.3 + 0.65 * age) * craterAmt, saturationLargest: 3 + rng() * 6,
+    youngCraters: Math.round((3 + rng() * 12) * (0.2 + 0.8 * craterAmt)), rayBrightness: icy ? 0.35 : 0.5 + rng() * 0.3, specks: Math.round(18000 * (w / 1024) ** 2 * craterAmt),
+    mottling: 0.2 + rng() * 0.2, rayColor: icy ? '#f4f8ff' : '#e8e4dc', reliefTone: 0.16, heightTone: 0.1, slopeTone: 0.22 };
   applyCraterSaturation(field, w, h, lunarO, R, D);
   await tick();
   // giant impact basins (South Pole-Aitken / Hellas / Herschel-class)
-  const nGiant = rng() < 0.55 ? 1 + Math.floor(rng() * 2) : 0;
+  const nGiant = rng() < 0.55 * (0.2 + 0.8 * craterAmt) ? 1 + Math.floor(rng() * 2) : 0;
   for (let k = 0; k < nGiant; k++) {
     const lat = Math.asin(rng() * 2 - 1), lon = rng() * TAU - Math.PI, alpha = 0.18 + rng() * 0.35;
     stampCrater(field, w, h, { latC: lat, lonC: toKLon(lon), alpha, depth: 0.22 * (0.6 + rng() * 0.6), rimH: 0.05, rimW: 0.3, floor: 0.5, ejecta: 0.6, carve: true, peak: 0, terrace: 0.4, floorRoughness: 0.3, seedSalt: seed + k });
@@ -122,9 +149,50 @@ async function bakeMoon(p, report) {
   report('Young rayed craters', 0.5);
   stampYoungCraters(field, w, h, lunarO, R, D, null);
   if (lunarO.youngCraters > 0) features.push('Rayed craters');
+  // resurfacing: young plains flood part of the old crust and erase its craters
+  let resurf = null;
+  if (act > 0.2) {
+    report(icy ? 'Cryovolcanic resurfacing' : 'Lava plains resurfacing', 0.55);
+    resurf = new Float32Array(w * h);
+    const cover = 0.15 + 0.7 * act, thr = 0.35 - cover * 0.7;
+    forEachDir(w, h, (i, x, y, z) => {
+      const u = sim3.fbm(x * 1.8 + 7, y * 1.8, z * 1.8, { octaves: 5 }) + 0.12 * sim4.noise(x * 9, y * 9, z * 9);
+      const m = sstep(thr, thr + 0.12, u); if (m <= 0) return;
+      resurf[i] = m;
+      // fresh plains sit on the smoothed old surface; wrinkle ridges (rocky) or grooves (icy) on top
+      let plain = preCrater[i] - 0.004;
+      if (!icy) plain += 0.006 * Math.pow(1 - Math.abs(sim4.noise(x * 16, y * 16, z * 16)), 10);
+      field[i] = mix(field[i], plain, m * 0.92);
+    });
+    features.push(icy ? 'Smooth resurfaced ice plains' : 'Young volcanic plains');
+  }
+  // grooved terrain (Ganymede): bright lanes of parallel ridges cutting across older dark terrain
+  if (icy && (act > 0.3 || p.grooves) && rg() < 0.8) {
+    const lanes = []; const nL = 4 + Math.floor(rg() * 8);
+    for (let k = 0; k < nL; k++) { const a = randDir(rg); lanes.push({ c: a, r: 0.25 + rg() * 0.5, dir: randDir(rg), k: 60 + rg() * 90, amp: 0.004 + rg() * 0.006 }); }
+    if (!resurf) resurf = new Float32Array(w * h);
+    forEachDir(w, h, (i, x, y, z) => {
+      for (const L of lanes) {
+        const d = Math.acos(Math.min(1, x * L.c[0] + y * L.c[1] + z * L.c[2])); if (d > L.r) continue;
+        const m = 1 - sstep(L.r * 0.6, L.r, d + 0.08 * sim3.noise(x * 6, y * 6, z * 6));
+        const g = Math.sin((x * L.dir[0] + y * L.dir[1] + z * L.dir[2]) * L.k + 3 * sim4.noise(x * 4, y * 4, z * 4));
+        field[i] = mix(field[i], preCrater[i], m * 0.7) + L.amp * g * m; resurf[i] = Math.max(resurf[i], m * 0.8);
+      }
+    });
+    features.push('Grooved terrain');
+  }
+  // sinuous rilles / canyons on rocky worlds with volcanic or tectonic history
+  if (!icy && act > 0.3 && rg() < 0.7) {
+    forEachDir(w, h, (i, x, y, z) => {
+      const v = sim4.fbm(x * 5 + 3, y * 5, z * 5, { octaves: 4 }); const wd = 0.012 + 0.01 * sim3.noise(x * 20, y * 20, z * 20);
+      const m = sstep(0.1, 0.4, sim3.fbm(x * 2, y * 2 + 5, z * 2, { octaves: 3 }));
+      field[i] -= 0.02 * m * (1 - sstep(wd * 0.3, wd, Math.abs(v)));
+    });
+    features.push('Sinuous rilles and canyons');
+  }
   // icy fracture networks: zero contours of fractal fields -> branching lineae / chasmata
   let crack = null;
-  if (icy && rng() < 0.75) {
+  if (icy && rng() < 0.45 + 0.5 * Math.max(act, p.cracks || 0)) {
     crack = new Float32Array(w * h);
     const gens = [[2.2, 0.035, 0.05], [5, 0.02, 0.025], [11, 0.012, 0.012]];
     const fx = [new Simplex3(seed + 21), new Simplex3(seed + 22), new Simplex3(seed + 23)];
@@ -141,6 +209,18 @@ async function bakeMoon(p, report) {
       crack[i] = c * strength;
     });
     features.push(rng() < 0.5 ? 'Global fracture network (lineae)' : 'Tectonic chasmata');
+  }
+  // chaos terrain: rafts of crust broken up and refrozen in a darker, reddish matrix (Europa)
+  let chaos = null;
+  if (icy && act > 0.45 && rg() < 0.6) {
+    chaos = new Float32Array(w * h);
+    forEachDir(w, h, (i, x, y, z) => {
+      const m = sstep(0.3, 0.45, sim3.fbm(x * 3 + 11, y * 3, z * 3, { octaves: 4 })); if (m <= 0) return;
+      const cx = Math.floor(x * 70 + sim4.noise(x * 30, y * 30, z * 30)), cy = Math.floor(y * 70), cz = Math.floor(z * 70);
+      const raft = Math.sin(cx * 12.9898 + cy * 78.233 + cz * 37.719) * 43758.5453; const rv = raft - Math.floor(raft);
+      field[i] += m * (rv > 0.55 ? 0.006 * rv : -0.004); chaos[i] = m * (rv > 0.55 ? 0.35 : 1);
+    });
+    features.push('Chaos terrain');
   }
   // equatorial ridge (Iapetus) or canyon system
   if (rng() < 0.08) { forEachDir(w, h, (i, x, y) => { field[i] += 0.12 * Math.exp(-(y * y) / 0.0012); }); features.push('Equatorial ridge'); }
@@ -165,9 +245,15 @@ async function bakeMoon(p, report) {
   normalizeCopyStats(field);
   const twoTone = rng() < 0.06, ttDir = randDir(rng);
   forEachDir(w, h, (i, x, y, z) => {
-    const t = clamp01((field[i] - 0.3) / 0.45 + 0.2 * sim2.fbm(x * 6, y * 6, z * 6, { octaves: 3 }));
+    const t = clamp01((baseField[i] - 0.3) / 0.45 + 0.2 * sim2.fbm(x * 6, y * 6, z * 6, { octaves: 3 }));
     let c = t < 0.5 ? [mix(pal.low[0], pal.mid[0], t * 2), mix(pal.low[1], pal.mid[1], t * 2), mix(pal.low[2], pal.mid[2], t * 2)]
       : [mix(pal.mid[0], pal.high[0], t * 2 - 1), mix(pal.mid[1], pal.high[1], t * 2 - 1), mix(pal.mid[2], pal.high[2], t * 2 - 1)];
+    // geologic units: broad regions whose composition (and so colour) differs a little
+    const u1 = sim3.fbm(x * 2.3 + 40, y * 2.3, z * 2.3, { octaves: 3 }), u2 = sim4.fbm(x * 1.7, y * 1.7 + 17, z * 1.7, { octaves: 3 });
+    const ub = 1 + 0.09 * u1, uw = 0.018 * u2; // brightness, plus a slight warm/cool shift
+    c = [c[0] * (ub + uw), c[1] * ub, c[2] * (ub - uw)];
+    if (resurf && resurf[i] > 0) c = icy ? c.map((v, j) => mix(v, Math.min(1, pal.high[j] * 1.04 + 0.02), resurf[i] * 0.55)) : c.map((v, j) => mix(v, pal.low[j] * 0.72, resurf[i] * 0.6));
+    if (chaos && chaos[i] > 0) { const cc = p.crackColor || [0.52, 0.36, 0.26]; c = c.map((v, j) => mix(v, cc[j], chaos[i] * 0.6)); }
     if (icy && crack && crack[i] > 0.05) { const cc = p.crackColor || [0.55, 0.38, 0.26]; c = [mix(c[0], cc[0], crack[i] * 0.8), mix(c[1], cc[1], crack[i] * 0.8), mix(c[2], cc[2], crack[i] * 0.8)]; }
     if (twoTone) { const k = sstep(-0.15, 0.25, x * ttDir[0] + y * ttDir[1] + z * ttDir[2]); c = c.map((v) => v * (1 - 0.8 * k)); }
     if (p.polar && Math.abs(y) > 0.85) { const k = sstep(0.85, 0.93, Math.abs(y) + 0.03 * sim.noise(x * 20, y * 20, z * 20)); c = c.map((v, j) => mix(v, p.polar[j], k)); }
