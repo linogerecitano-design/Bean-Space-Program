@@ -112,7 +112,8 @@ export class Pipeline {
       uDepth: { value: this.sceneRT.depthTexture }, uTime: { value: 0 },
     };
     this.cloudMat = new THREE.ShaderMaterial({
-      uniforms: { ...this.common, uNoise: { value: this.noise3 }, uNoiseS: { value: this.noise3.userData.size }, uCloudMap: { value: null }, uCloudMap1: { value: null }, uCloudReal: { value: null }, uPixAng: { value: 0.002 }, uHasMap: { value: 0 }, uSteps: { value: settings.q.cloudSteps }, uFrame: { value: 0 }, uFar3D: { value: settings.q.clouds3d }, uDbg: { value: 0 } },
+      uniforms: { ...this.common, uNoise: { value: this.noise3 }, uNoiseS: { value: this.noise3.userData.size }, uCloudMap: { value: null }, uCloudMap1: { value: null }, uCloudReal: { value: null }, uPixAng: { value: 0.002 }, uHasMap: { value: 0 }, uSteps: { value: settings.q.cloudSteps }, uFrame: { value: 0 }, uFar3D: { value: settings.q.clouds3d }, uDbg: { value: 0 },
+        uSpot: { value: Array.from({ length: 6 }, () => new THREE.Vector4()) }, uSpotS: { value: Array.from({ length: 6 }, () => new THREE.Vector4()) }, uNumSpot: { value: 0 }, uClock: { value: 0 } },
       vertexShader: FSQ_V,
       fragmentShader: `precision highp sampler3D;
         ${ATMO_COMMON}
@@ -129,10 +130,45 @@ export class Pipeline {
           float n = textureLod(uNoise, d * 1.7, 0.0).r * 0.55 + textureLod(uNoise, d * 5.3 + 0.3, 0.0).r * 0.3 + textureLod(uNoise, d * 13.0, 0.0).g * 0.15;
           return vec4(smoothstep(1.0 - A.coverage - 0.15, 1.0 - A.coverage + 0.25, n), 0.0, 0.0, 0.2);
         }
+        // gas-giant storms (body frame): centre + angular radius, and (aspect, spin); real time for lightning
+        uniform vec4 uSpot[6]; uniform vec4 uSpotS[6]; uniform int uNumSpot; uniform float uClock, uDbg;
+        float gStorm; // set by density(): how convective the sampled cloud is (drives lightning)
+        float gCore;  // set by density(): 1 inside a gas-giant vortex (keeps the storm's own colour)
+        // twist a direction around the storms' vortices, so the clouds spiral with them; core: 1 inside a storm
+        vec3 swirl(vec3 d, out float core) {
+          core = 0.0;
+          for (int i = 0; i < 6; i++) {
+            if (i >= uNumSpot) break;
+            vec3 c = uSpot[i].xyz; float R = uSpot[i].w, asp = uSpotS[i].x, spin = uSpotS[i].y;
+            float dc = dot(d, c); if (dc <= 0.0) continue;
+            vec3 e = normalize(cross(vec3(0.0, 1.0, 0.0), c)); vec3 n = cross(c, e);
+            vec3 t = d - c * dc; vec2 tv = vec2(dot(t, e) / (R * asp), dot(t, n) / R); float u = length(tv);
+            if (u >= 1.25) continue;
+            float k = 1.0 - u * u / 1.5625; float ang = sign(spin) * min(abs(spin), 3.0) * 2.4 * k * k; // faster near the middle: spiral arms
+            float cs = cos(ang), sn = sin(ang); vec2 r = vec2(cs * tv.x - sn * tv.y, sn * tv.x + cs * tv.y);
+            d = normalize(c * dc + e * (r.x * R * asp) + n * (r.y * R));
+            core = max(core, 1.0 - smoothstep(0.5, 1.05, u));
+          }
+          return d;
+        }
+        float hash31(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+        // lightning: storm cells flash now and then (a main stroke, sometimes a restrike), lighting the cloud from inside
+        vec3 lightningAt(Atmo A, vec3 q, float hf) {
+          float cs = A.stack > 3.5 ? (A.Rt - A.Rb) * 3.0 : 25000.0;
+          vec3 g = q / cs; vec3 id = floor(g); vec3 f = fract(g) - 0.5;
+          float h = hash31(id), h2 = hash31(id + 17.3);
+          if (h2 > (A.stack > 3.5 ? 0.6 : 0.45)) return vec3(0.0); // only some storm cells are active
+          float per = 1.2 + h * 3.5; float ph = fract(uClock / per + h * 7.1) * per; // seconds into this cell's cycle
+          float e = exp(-ph * 6.0) * (0.65 + 0.35 * sin(ph * 160.0)) + (h2 < 0.3 ? 0.9 * exp(-abs(ph - 0.22) * 18.0) : 0.0); // stroke + restrike
+          if (uDbg > 0.5) e = 1.0;
+          vec3 cen = (vec3(hash31(id + 3.1), hash31(id + 5.7), hash31(id + 9.2)) - 0.5) * 0.6;
+          vec3 df = f - cen; float sp = exp(-dot(df, df) * 9.0) * (1.0 - hf * 0.4);
+          return vec3(0.72, 0.8, 1.0) * e * sp;
+        }
         // the band colour under a gas giant's cloud (its albedo map, or the base band tint before it is baked)
         vec3 gasBand(Atmo A, vec3 dirB, float lod) { return A.cloudTex > 0.5 ? layersAt(A, dirB, lod).rgb : A.cloudColor; }
         float density(Atmo A, vec3 p, out float hf) {
-          vec3 q = A.w2b * (p - A.C); float r = length(q); vec3 d = q / r; dCam = length(p);
+          vec3 q = A.w2b * (p - A.C); float r = length(q); vec3 d = q / r; dCam = length(p); gStorm = 0.0; gCore = 0.0;
           hf = clamp((r - A.Rb) / (A.Rt - A.Rb), 0.0, 1.0);
           float texel = 6.2831853 * A.Rb / 2048.0;
           float lod = max(0.0, log2(max(1.0, length(p) * uPixAng / texel)) - 1.0);
@@ -159,6 +195,7 @@ export class Pipeline {
             float covR = A.real2D > 0.5 ? max(textureLod(uCloudReal, eqUV(drw), lod).r, L.g * 0.8) : L.r;
             float covB = smoothstep(0.08, 0.8, covR);
             float base = smoothstep(0.0, 0.3, covB * 1.35 * profB - (1.0 - shape) * 0.62 - (1.0 - detail) * 0.2);
+            gStorm = smoothstep(0.55, 0.9, L.g) * smoothstep(0.3, 0.7, covB); // cumulonimbus: occasional thunderstorms
             float anvil = clamp(smoothstep(0.25, 0.8, L.g) * 1.1 * profS - (1.0 - nz((q + wind) / (sc * 2.5), sc * 2.5).r) * 0.35, 0.0, 1.0);
             float fib = nz(vec3(q.x / 30000.0, q.y / 4000.0, q.z / 30000.0) + uTime * 0.001, 11000.0).b;
             float cirrus = clamp(L.b * profC * (fib * 1.4 - 0.3), 0.0, 1.0) * 0.18;
@@ -167,10 +204,16 @@ export class Pipeline {
           if (A.stack > 3.5) { // gas giant: rounded convective cloud heads and thunderhead towers over the band deck
             float lum = dot(gasBand(A, d, lod), vec3(0.3, 0.5, 0.2));
             float cov = clamp(A.coverage + (lum - 0.5) * 1.6, 0.15, 0.92);      // bright zones: thick ammonia decks
-            float scale = thick * 1.8; vec3 qs = d * A.Rb; vec3 gw = wind * 25.0;
+            float core; vec3 dS = swirl(d, core); // clouds wrap around the Great Red Spot and other big storms
+            // storm-scale structure, wound up by the twist into spiral bands (inside a vortex only)
+            float arms = nz(dS * A.Rb / (thick * 25.0), thick * 25.0).r * 0.7 + nz(dS * A.Rb / (thick * 9.0), thick * 9.0).g * 0.3;
+            cov = mix(cov, 0.2 + 1.1 * smoothstep(0.35, 0.7, arms), core * 0.85); gCore = core;
+            float scale = thick * 1.8; vec3 qs = dS * A.Rb; vec3 gw = wind * 25.0; q = dS * r;
             float shape = nz((qs + gw) / scale, scale).r * 0.7 + nz((qs + gw) / (scale * 0.45), scale * 0.45).g * 0.3;
             float m = clamp((shape - (1.0 - cov) * 0.85) / max(1.0 - (1.0 - cov) * 0.85, 0.05), 0.0, 1.0);
             float storm = smoothstep(0.55, 0.78, nz(qs / (scale * 8.0), scale * 8.0).b); // scattered towering storms
+            gStorm = (0.3 + 0.7 * storm) * (1.0 - core);                        // lightning lives in the convective belts, most in the towers
+            float eyewall = core * (1.0 - core) * 4.0; storm = max(storm, core * 0.55 + eyewall * 0.35); // raised vortex deck
             float top = (0.22 + 0.72 * storm) * sqrt(m);                          // sqrt: domed, cauliflower tops
             float prof = smoothstep(0.0, 0.04, hf) * (1.0 - smoothstep(top - 0.07, top + 0.01, hf));
             float det = nz((q + gw * 1.3) / (scale * 0.12), scale * 0.12).g * 0.6 + nz((q + gw) / (scale * 0.045), scale * 0.045).r * 0.4;
@@ -197,7 +240,7 @@ export class Pipeline {
           return clamp(cov * 1.25 * prof - (1.0 - shape) * 0.55 - (1.0 - detail) * 0.15 * (1.0 - hf * 0.5), 0.0, 1.0);
         }
         float hg(float c, float g) { float g2 = g * g; return (1.0 - g2) / (12.566 * pow(1.0 + g2 - 2.0 * g * c, 1.5)); }
-        uniform float uFrame, uFar3D, uDbg;
+        uniform float uFrame, uFar3D;
         // interleaved gradient noise, rotated each frame (the temporal pass averages it out)
         float ign(vec2 p) { p += uFrame * 5.588238; return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y)); }
         // coverage of the flattened cloud layers (used for the distant 2D representation)
@@ -237,6 +280,7 @@ export class Pipeline {
           float lit = smoothstep(-0.12, 0.25, ndl) * (0.45 + 0.55 * max(ndl, 0.0)) * (1.0 - 0.45 * shadow * (1.0 - cov * 0.5));
           vec3 amb = (A.betaR / max(max(A.betaR.x, A.betaR.y), max(A.betaR.z, 1e-9))) * 0.05 * smoothstep(-0.3, 0.1, ndl);
           vec3 c = uSunColor * A.cloudColor * (sunT * lit * 0.55 + amb);
+          if (A.stack > 0.5 && A.stack < 1.5) { float st = smoothstep(0.55, 0.9, layersAt(A, dW, lod).g); if (st > 0.02) c += lightningAt(A, q, 0.3) * st * 20.0; } // thunderstorms seen from orbit
           float a = clamp(cov * (A.opaque > 0.5 ? 1.2 : 1.1), 0.0, 1.0);
           if (A.stack > 2.5) a *= 0.3; // Mars: thin water-ice wisps and dust haze, never thick decks
           a *= tailK;
@@ -287,7 +331,7 @@ export class Pipeline {
                 float u0 = (float(i) + jitter) / float(N), u1 = (float(i) + 1.0 + jitter) / float(N);
                 float t = t0 + L * u0 * u0; float dt = L * (u1 * u1 - u0 * u0);
                 vec3 p = rd * t; float hf;
-                float d = density(A, p, hf);
+                float d = density(A, p, hf); float stormHere = gStorm, coreHere = gCore;
                 if (d > 0.002) {
                   float ld = 0.0; float ls = thick * 0.12;
                   for (int k = 1; k <= 3; k++) { float hh; ld += density(A, p + uSunDir * ls * float(k * k), hh) * ls * float(k * k); }
@@ -300,8 +344,9 @@ export class Pipeline {
                   vec3 lightC = uSunColor * sunT * shade * (Tsun * phase * mix(1.0, powder * 2.0, 0.35) * 0.55 + amb * (0.6 + 0.8 * hf) * 1.5);
                   float Ti = exp(-d * sigma * dt);
                   vec3 tint = A.cloudColor;
-                  if (A.stack > 3.5) { vec3 dq = normalize(A.w2b * (p - A.C)); tint = mix(gasBand(A, dq, 1.0) * 1.2, vec3(1.0, 0.97, 0.92), 0.25 + 0.45 * hf); } // whiter ammonia-ice tops
+                  if (A.stack > 3.5) { vec3 dq = normalize(A.w2b * (p - A.C)); tint = mix(gasBand(A, dq, 1.0) * 1.2, vec3(1.0, 0.97, 0.92), (0.12 + 0.35 * hf) * (1.0 - coreHere * 0.85)); } // whiter ammonia-ice tops, but storms keep their colour
                   c3 += T3 * (1.0 - Ti) * lightC * tint;
+                  if (stormHere > 0.02) c3 += T3 * (1.0 - Ti) * lightningAt(A, A.w2b * (p - A.C), hf) * stormHere * 22.0;
                   T3 *= Ti;
                 }
               }
@@ -533,6 +578,12 @@ export class Pipeline {
         if (a.real2D) { this.cloudMat.uniforms.uCloudReal.value = a.real2D; u.real2D = 1; }
       }
       u.w2b.copy(a.w2b); u.oblate = a.oblate || 0; if (a.pole) u.pole.copy(a.pole);
+    }
+    { // storms of the (nearest) gas giant with a cloud deck, and a real-time clock for lightning
+      const cu = this.cloudMat.uniforms; let ns = 0;
+      const g = list.slice(0, U.uNumA.value).find(a => a.clouds && a.clouds.stack === 4 && a.clouds.spots);
+      if (g) for (const sp of g.clouds.spots) { if (ns >= 6) break; cu.uSpot.value[ns].set(sp.dir[0], sp.dir[1], sp.dir[2], sp.R); cu.uSpotS.value[ns].set(sp.aspect, sp.spin, 0, 0); ns++; }
+      cu.uNumSpot.value = ns; cu.uClock.value = (performance.now() / 1000) % 3600;
     }
     this.cloudMat.uniforms.uHasMap.value = hasMap; this.cloudMat.uniforms.uCloudMap.value = map || this.noiseDummy(); this.cloudMat.uniforms.uCloudMap1.value = map1 || this.noiseDummy(); if (!this.cloudMat.uniforms.uCloudReal.value) this.cloudMat.uniforms.uCloudReal.value = this.noiseDummy();
     const anyClouds = list.slice(0, U.uNumA.value).some(a => a.clouds);

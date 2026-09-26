@@ -281,6 +281,13 @@ export class World {
     if (b.isGas) { // gas giants: a 3D deck of convective cloud towers over the banded deck, tinted by the bands
       if (!b._clouds) b._clouds = { coverage: 0.5, color: (st && st.bands && st.bands[0]) || [0.85, 0.75, 0.6], height: 0, thickness: 140000 * Math.min(1.5, Math.max(0.5, b.radius / 7e7)), opaque: false, speed: 0, stack: 4 };
       if (!b._clouds.map) { const v = this.visuals.get(b); b._clouds.map = b.sys.real && PLANET_MAPS[b.name] ? planetTexture(PLANET_MAPS[b.name]) : (v && v.gg && v.gg.ready && v.gg.albedo) || null; }
+      if (!b._clouds.spots) { // the bake's vortices, in the body frame the cloud shader samples (eqUV: u = 0.5 - lon/2π)
+        const v = this.visuals.get(b); const P = v && v.gg && v.gg.P;
+        if (P) b._clouds.spots = (P.spots || []).filter(sp => sp.on !== 0).sort((a, c) => c.size - a.size).slice(0, 6).map(sp => {
+          const L = sp.lon * Math.PI / 180, la = sp.lat * Math.PI / 180, cl = Math.cos(la);
+          return { dir: [cl * Math.cos(L), Math.sin(la), -cl * Math.sin(L)], R: sp.size * Math.PI, aspect: sp.aspect || 1.6, spin: sp.spin || 2 };
+        });
+      }
       return b._clouds;
     }
     if (!st || !st.clouds) return null;
