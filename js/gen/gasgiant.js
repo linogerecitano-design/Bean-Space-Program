@@ -297,7 +297,7 @@ export function giantParams(body) {
     const A = {
       jupiter: { bands: [12, 30], con: [0.45, 0.8], sharp: [1.5, 2.8], turb: [0.5, 1.0], haze: [0.2, 0.45], det: [0.18, 0.32], fil: [0.08, 0.2], small: [8, 24], spots: [1, 4], ramp: 1 },
       saturn:  { bands: [16, 32], con: [0.14, 0.34], sharp: [0.8, 1.4], turb: [0.2, 0.45], haze: [0.5, 0.8], det: [0.08, 0.16], fil: [0.02, 0.07], small: [0, 5], spots: [0, 1], ramp: 0.55 },
-      uranus:  { bands: [3, 7], con: [0.05, 0.2], sharp: [0.6, 1.0], turb: [0.1, 0.3], haze: [0.6, 0.85], det: [0.04, 0.1], fil: [0.0, 0.03], small: [0, 2], spots: [0, 0], ramp: 0.3 },
+      uranus:  { bands: [3, 7], con: [0.03, 0.12], sharp: [0.6, 1.0], turb: [0.08, 0.25], haze: [0.7, 0.9], det: [0.02, 0.06], fil: [0.0, 0.02], small: [0, 2], spots: [0, 0], ramp: 0.16 },
       neptune: { bands: [5, 11], con: [0.4, 0.7], sharp: [1.0, 2.0], turb: [0.4, 0.8], haze: [0.3, 0.5], det: [0.16, 0.28], fil: [0.06, 0.14], small: [3, 8], spots: [1, 2], ramp: 0.8 },
     }[arch];
     if (name !== 'Toxic Alien') grad = proceduralGradient(r, body.class, A.ramp);
@@ -311,7 +311,8 @@ export function giantParams(body) {
     const top = hex2rgb(grad[grad.length - 1][1]), bot = hex2rgb(grad[0][1]);
     const hx = (c) => '#' + c.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
     P.hazeColor = hx(top.map(v => v * 0.6 + 0.38)); P.poleColor = hx(bot.map((v, i) => v * 0.7 + top[i] * 0.3)); P.poleAmt = u(0.1, 0.5);
-    P.eqWarm = body.class === 'jovian' ? u(0, 0.4) : u(0, 0.1); P.saturation = u(0.85, 1.15); P.contrast = u(0.95, 1.1);
+    P.eqWarm = body.class === 'jovian' && arch === 'jupiter' ? u(0, 0.4) : u(0, 0.08); P.saturation = u(0.85, 1.15); P.contrast = u(0.95, 1.1);
+    if (arch === 'uranus') { P.poleAmt *= 0.4; P.contrast = u(0.88, 0.98); P.wisp = 0; }
     P.smallCol = grad[Math.floor(r() * grad.length)][1];
     for (const sp of P.spots) sp.color = r() < 0.5 ? grad[Math.floor(r() * grad.length)][1] : sp.color;
   }

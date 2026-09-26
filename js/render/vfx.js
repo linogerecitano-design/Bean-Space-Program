@@ -155,8 +155,8 @@ export function makePlasma() {
           float sheath = smoothstep(env, env * 0.55, max(rho, sd + uRad)) * smoothstep(-0.3, 0.2, -wind + aft);
           float tongues = pow(n, 2.2) * (1.0 + 1.5 * smoothstep(0.55, 0.9, n));
           float wake = sheath * tongues * exp(-aft * (0.55 - 0.25 * uK));
-          float T = clamp(0.35 + 0.65 * uK - aft * 0.18 + (n - 0.5) * 0.3, 0.0, 1.0);
-          vec3 e = fire(clamp(0.5 + 0.35 * uK + 0.15 * n, 0.0, 1.0)) * layer * (1.2 + 2.2 * uK)
+          float T = clamp(0.25 + 0.45 * uK - aft * 0.2 + (n - 0.5) * 0.35, 0.0, 1.0);
+          vec3 e = fire(clamp(0.4 + 0.3 * uK + 0.15 * n, 0.0, 1.0)) * layer * (1.2 + 2.2 * uK)
                  + fire(T) * wake * (1.6 + 2.0 * uK)
                  + vec3(0.55, 0.3, 1.0) * layer * smoothstep(0.6, 1.0, uK) * 0.8;   // ionised air glow
           col += e * dt;
