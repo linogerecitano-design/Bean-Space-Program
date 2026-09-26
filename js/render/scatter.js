@@ -63,6 +63,9 @@ const REBUILD = { rock: 30, tree: 30, treeFar: 180, shrub: 16, grass: 7, debris:
 // always drawn regardless of view direction (shadows and objects right next to the camera)
 const NEAR_KEEP = { rock: 25, tree: 40, shrub: 12, grass: 6, debris: 12 };
 const KINDS = ['grass', 'shrub', 'rock', 'tree', 'treeFar', 'debris'];
+// triangle budget per model and kind: caps above count instances, but a 2,500-triangle grass clump
+// costs 7x a 360-triangle one, and thousands of the heavy ones were what made the ground crawl
+const TRI_BUDGET = { rock: IS_MOBILE ? 60e3 : 250e3, tree: IS_MOBILE ? 150e3 : 600e3, treeFar: 1e9, shrub: IS_MOBILE ? 40e3 : 160e3, grass: IS_MOBILE ? 60e3 : 300e3, debris: IS_MOBILE ? 20e3 : 80e3 };
 
 // ---------------------------------------------------------------- model library
 const loader = makeGLTFLoader();
@@ -101,6 +104,9 @@ function patchFoliage(mat, strength) {
       { vec2 tp = vMapUv * vec2(textureSize(map, 0)); vec2 ddx = dFdx(tp), ddy = dFdy(tp);
         float lod = 0.5 * log2(max(max(dot(ddx, ddx), dot(ddy, ddy)), 1e-8));
         diffuseColor.a *= 1.0 + max(lod, 0.0) * 0.35; }
+      #endif
+      #ifdef ALPHA_TO_COVERAGE
+      diffuseColor.a = smoothstep(0.3, 0.55, diffuseColor.a); // crisp cut-outs: soft alpha dithers into grain
       #endif
       #include <alphatest_fragment>`);
   };
@@ -375,7 +381,8 @@ export class Scatter {
     for (const [id, list] of buckets) {
       const key = far ? id + ':far' : id;
       const entry = lib.get(id); if (!entry) continue;
-      const cap = far ? CAP.treeFar : CAP[kind];
+      const tris = entry.tris || (entry.tris = entry.parts.reduce((a, p) => a + (p.geo.index ? p.geo.index.count : p.geo.attributes.position.count) / 3, 0));
+      const cap = Math.max(8, Math.min(far ? CAP.treeFar : CAP[kind], Math.floor(TRI_BUDGET[kind] / Math.max(tris, 1))));
       if (list.length > cap) { list.sort((a, b) => a.d - b.d); list.length = cap; }
       let rec = this.meshes.get(key);
       if (!rec || rec.cap < list.length) {
@@ -389,7 +396,7 @@ export class Scatter {
           const g2 = g.clone().rotateY(Math.PI / 2); const cross = mergeGeometries([g, g2]);
           meshes.push(new THREE.InstancedMesh(cross, entry.impostorMat, cap2));
         } else {
-          for (const part of entry.parts) { const im = new THREE.InstancedMesh(part.geo, part.mat, cap2); im.castShadow = kind === 'tree' || kind === 'rock'; im.receiveShadow = true; meshes.push(im); }
+          for (const part of entry.parts) { const im = new THREE.InstancedMesh(part.geo, part.mat, cap2); im.castShadow = kind === 'tree'; im.receiveShadow = true; meshes.push(im); }
         }
         for (const m of meshes) { m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); group.add(m); }
         rec = { meshes, cap: cap2, kind }; this.meshes.set(key, rec);

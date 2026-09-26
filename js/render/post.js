@@ -349,7 +349,7 @@ export class Pipeline {
         // buffer; anything in front of the ray (within a thickness window) blocks the light
         float ssShadow(vec3 rd, float sd) {
           if (sd > 1e29 || dot(uSunDir, uSunDir) < 0.5) return 1.0;
-          vec3 P = rd * sd; float len = clamp(sd * 0.25, 20.0, 200.0); float jit = hash12(gl_FragCoord.xy);
+          vec3 P = rd * sd; float len = clamp(sd * 0.08, 1.5, 12.0); float jit = 0.5; // short contact shadows, fixed pattern (random jitter read as grain)
           for (int i = 1; i <= 14; i++) {
             float t = len * pow((float(i) - jit) / 14.0, 1.7);
             vec3 Q = P + uSunDir * t; vec3 v = transpose(uCamRot) * Q; if (v.z > -1e-3) break;
@@ -366,7 +366,7 @@ export class Pipeline {
           float sd = sceneDist(vUv, rd);
           vec3 col = texture(uScene, vUv).rgb;
           // near-field only (vessels, rocks, boulders): at kilometre scales depth precision makes it unreliable
-          if (uSSS > 0.5 && sd < 1500.0) { float sh = ssShadow(rd, sd); col *= mix(mix(0.25, 1.0, sh), 1.0, smoothstep(700.0, 1500.0, sd)); }
+          if (uSSS > 0.5 && sd < 150.0) { float sh = ssShadow(rd, sd); col *= mix(mix(0.45, 1.0, sh), 1.0, smoothstep(60.0, 150.0, sd)); }
           if (uHasVol > 0.5) { vec4 vo = upsample(uVol, vUv); col = col * (1.0 - vo.a) + vo.rgb; }
           vec4 cl = upsample(uClouds, vUv);
           col = col * cl.a + cl.rgb;

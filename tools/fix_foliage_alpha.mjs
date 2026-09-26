@@ -50,7 +50,9 @@ function keyAlpha(rgb, w, h) {
   const out = Buffer.alloc(w * h * 4);
   for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
     const m = Math.max(rgb[i], rgb[i + 1], rgb[i + 2]);
-    const t = Math.min(1, Math.max(0, (m - 9) / 22)); const a = t * t * (3 - 2 * t);
+    // narrow ramp: only the (noisy) black background goes transparent; dark leaves stay fully opaque
+    // (a wide ramp left them half see-through, which alpha-to-coverage renders as a grainy dither)
+    const t = Math.min(1, Math.max(0, (m - 7) / 7)); const a = t * t * (3 - 2 * t);
     out[j] = rgb[i]; out[j + 1] = rgb[i + 1]; out[j + 2] = rgb[i + 2]; out[j + 3] = Math.round(a * 255);
   }
   return out;

@@ -32,7 +32,11 @@ export function layout(design) {
         const rp = PART[r.node.id]; if (!rp) continue;
         const at = r.at ?? 0.5;
         const yA = cy - (p.h || 1) * at;
-        const parentR = Math.max(p.d || 0, p.d2 || 0) / 2 || 0.5;
+        // surface radius at the attach height: capsules taper (d = base, dTop = top), adapters and
+        // nose cones run from d at the top to d2 at the bottom; using the widest radius left parts
+        // such as a chute near a capsule's nose floating in the air beside it
+        const rTop = p.dTop != null ? p.dTop / 2 : (p.d || 0) / 2, rBot = p.dTop != null ? (p.d || 0) / 2 : (p.d2 ?? p.d ?? 0) / 2;
+        const parentR = Math.max(0.1, rTop + (rBot - rTop) * Math.max(0, Math.min(1, at))) || 0.5;
         for (let k = 0; k < r.sym; k++) {
           const a = (r.angle || 0) + ang + k * Math.PI * 2 / r.sym;
           const ca = Math.cos(a), sa = Math.sin(a);
