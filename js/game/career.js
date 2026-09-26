@@ -70,6 +70,8 @@ export function research(game, id) {
 
 // ---------------------------------------------------------------- situations & science
 export const SITUATIONS = { landed: 'Landed', splashed: 'Splashed down', flyingLow: 'Flying low', flyingHigh: 'Flying high', spaceLow: 'In space near', spaceHigh: 'In space high over' };
+const SIT_PHRASE = { landed: 'landed on', splashed: 'splashed down on', flyingLow: 'flying low over', flyingHigh: 'flying high over', spaceLow: 'in space near', spaceHigh: 'in space high above' };
+export const sitText = (sit, body) => `${SIT_PHRASE[sit] || sit} ${body}`;
 const SIT_MULT = { landed: 1.5, splashed: 1.0, flyingLow: 0.7, flyingHigh: 0.9, spaceLow: 1.2, spaceHigh: 1.0 };
 // how hard a body is to reach (sets how much its science is worth)
 const BODY_MULT = { Earth: 1, Moon: 4, Mars: 7, Phobos: 7, Deimos: 7, Venus: 7, Mercury: 9, Sun: 8, Ceres: 10, Vesta: 10, Jupiter: 12, Io: 13, Europa: 13, Ganymede: 13, Callisto: 12, Saturn: 15, Titan: 16, Enceladus: 16, Uranus: 18, Neptune: 20, Triton: 21, Pluto: 25, Charon: 25 };
@@ -131,7 +133,7 @@ export function sciValue(game, kind, body, sit) {
 export function runScience(game, kind, body, sit) {
   const tp = sciValue(game, kind, body, sit); if (!tp) return 0;
   game.science ||= {}; game.science[sciKey(kind, body, sit)] = tp; game.tp += tp;
-  (game.log ||= []).push({ t: game.t, text: `${EXPERIMENTS[kind].name} — ${SITUATIONS[sit]} ${body.name}: +${tp} TP` });
+  (game.log ||= []).push({ t: game.t, text: `${EXPERIMENTS[kind].name} — ${sitText(sit, body.name)}: +${tp} TP` });
   return tp;
 }
 
@@ -242,7 +244,7 @@ export function makeContract(game, r) {
     const b = tier >= 3 && r() < 0.5 ? pickBody() : 'Earth';
     const sits = Object.keys(SITUATIONS).filter(s => b !== 'Earth' || s !== 'landed').filter(s => expAllowed(kind, s, { atmo: b === 'Earth' || b === 'Mars' || b === 'Venus' ? { P0: 1 } : null }));
     const sit = sits[Math.floor(r() * sits.length)] || 'spaceLow';
-    c = { type: 'science', kind, body: b, sit, title: `${EXPERIMENTS[kind].name}`, text: `Run a ${EXPERIMENTS[kind].name.toLowerCase()} while ${SITUATIONS[sit].toLowerCase()} ${b}.`, pay: 12000 + round(20000 * bodyMult({ name: b, sys: { real: true } }) * (sit === 'landed' ? 1.5 : 1), 500) };
+    c = { type: 'science', kind, body: b, sit, title: `${EXPERIMENTS[kind].name}`, text: `Collect ${EXPERIMENTS[kind].name.toLowerCase()} data while ${sitText(sit, b)}.`, pay: 12000 + round(20000 * bodyMult({ name: b, sys: { real: true } }) * (sit === 'landed' ? 1.5 : 1), 500) };
   }
   c.pay = round(c.pay, 500); c.advance = round(c.pay * 0.2, 500); c.tp = Math.max(1, Math.round(c.pay / 25000));
   c.id = 'c' + Math.floor(r() * 1e9).toString(36); c.giver = g.id;

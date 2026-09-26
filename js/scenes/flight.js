@@ -1,7 +1,7 @@
 // Flight scene: launch, fly, stage, orbit, land, EVA, time warp, map view, interstellar travel.
 import * as THREE from 'three';
 import { h, mount, clearUI, flash, modal, toast } from '../ui/ui.js';
-import { isCareer, newFlightRecord, trackFlight, checkAchievements, checkContracts, situationOf, SITUATIONS, EXPERIMENTS, sciValue, runScience, fmtFunds, expAllowed } from '../game/career.js';
+import { isCareer, newFlightRecord, trackFlight, checkAchievements, checkContracts, situationOf, SITUATIONS, EXPERIMENTS, sciValue, runScience, fmtFunds, expAllowed, sitText } from '../game/career.js';
 import { V3, fmtDist, fmtSpeed, fmtTime, fmtMass, AU, LY, C_LIGHT, G0, DAY } from '../core/math.js';
 import { Orbit } from '../core/orbit.js';
 import { Vessel, physicsStep, updateSituation, vesselUp, cloneNode, newNode } from '../core/vessel.js';
@@ -571,13 +571,13 @@ export class FlightScene {
   runExp(e) {
     const G = this.G, g = G.game, v = this.vessel;
     const tp = runScience(g, e.kind, v.body, e.sit);
-    if (!tp) return flash(e.ok ? `Already studied ${e.name.toLowerCase()} ${SITUATIONS[e.sit].toLowerCase()} ${v.body.name}` : `${e.name} doesn't work here`);
-    toast(e.name, `${SITUATIONS[e.sit]} ${v.body.name} · +${tp} TP`, 'sci');
+    if (!tp) return flash(e.ok ? `Already collected ${e.name.toLowerCase()} data ${sitText(e.sit, v.body.name)}` : `${e.name} doesn't work here`);
+    toast(e.name, `${sitText(e.sit, v.body.name)} · +${tp} TP`, 'sci');
     this.careerTick(0, { science: { kind: e.kind, body: v.body.name, sit: e.sit } });
   }
   sciencePanel() {
     const v = this.vessel; document.querySelector('.part-menu')?.remove();
-    const { el, body } = this.menuShell('🔬 Science · ' + SITUATIONS[situationOf(v)] + ' ' + v.body.name, innerWidth / 2 - 150, 90);
+    const { el, body } = this.menuShell('🔬 Science · ' + sitText(situationOf(v), v.body.name), innerWidth / 2 - 150, 90);
     const list = this.experiments();
     if (!list.length) body.append(h('div.small.dim', {}, 'No experiments aboard. Add science parts in the VAB, or bring a Bean for crew reports.'));
     for (const e of list) body.append(h('div.sci-row', {}, h('span', {}, e.name), e.tp ? h('span.tp', {}, '+' + e.tp + ' TP') : h('span.small.dim', {}, e.ok ? 'done here' : 'n/a here'),

@@ -4,7 +4,7 @@
 import { h, mount, clearUI, flash, toast } from '../ui/ui.js';
 import { PART } from '../data/parts.js';
 import { partIcon } from '../render/partIcons.js';
-import { TECH, TECH_BY_ID, canResearch, research, ACHIEVEMENTS, fmtFunds, EXPERIMENTS, SITUATIONS } from '../game/career.js';
+import { TECH, TECH_BY_ID, canResearch, research, ACHIEVEMENTS, fmtFunds, EXPERIMENTS, SITUATIONS, sitText } from '../game/career.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
@@ -111,7 +111,7 @@ export class RnDScene {
     const byBody = {}; for (const r of rows) (byBody[r.body] ||= []).push(r);
     for (const [b, list] of Object.entries(byBody)) {
       wrap.append(h('h3', {}, b));
-      wrap.append(h('div.ach-grid', {}, list.map(r => h('div.ach.got', {}, h('div.ach-t', {}, EXPERIMENTS[r.kind]?.name || r.kind), h('div.small.dim', {}, SITUATIONS[r.sit] + ' ' + b), h('div.small.tp', {}, `+${r.tp} TP`)))));
+      wrap.append(h('div.ach-grid', {}, list.map(r => h('div.ach.got', {}, h('div.ach-t', {}, EXPERIMENTS[r.kind]?.name || r.kind), h('div.small.dim', {}, sitText(r.sit, b)), h('div.small.tp', {}, `+${r.tp} TP`)))));
     }
     page.append(wrap);
   }

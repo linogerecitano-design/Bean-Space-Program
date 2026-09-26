@@ -64,7 +64,7 @@ function bigHall() {
   const decal = new THREE.Mesh(new THREE.PlaneGeometry(320, 320), new THREE.MeshStandardMaterial({ map: paint, transparent: true, depthWrite: false, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2 }));
   decal.rotation.x = -Math.PI / 2; decal.position.y = 0.02; B.dyn.add(decal);
   const hz = std({ map: hazardTex(), roughness: 0.6 });
-  for (const [x, z, w, d] of [[0, -24, 48, 1.2], [0, 24, 48, 1.2], [-24, 0, 1.2, 48], [24, 0, 1.2, 48]]) { const m = B.box(w, 0.05, d, hz, x, 0.03, z); const uv = m.geometry.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * Math.max(w, d) / 8); if (d > w) m.rotation.y = 0; }
+  for (const [x, z, ry] of [[0, -24, 0], [0, 24, 0], [-24, 0, Math.PI / 2], [24, 0, Math.PI / 2]]) { const m = B.box(49.2, 0.05, 1.2, hz, x, 0.03, z, ry); const uv = m.geometry.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 6); }
   // walls: ribbed cladding
   const wt = canvasTex(256, 256, (g) => { g.fillStyle = '#56606c'; g.fillRect(0, 0, 256, 256); for (let x = 0; x < 256; x += 16) { g.fillStyle = 'rgba(0,0,0,0.2)'; g.fillRect(x, 0, 3, 256); g.fillStyle = 'rgba(255,255,255,0.06)'; g.fillRect(x + 3, 0, 2, 256); } for (let i = 0; i < 400; i++) { g.fillStyle = `rgba(30,30,30,${Math.random() * 0.05})`; g.fillRect(Math.random() * 256, Math.random() * 256, 1, 10 + Math.random() * 40); } }, [20, 12]);
   const room = new THREE.Mesh(new THREE.BoxGeometry(320, 242, 320), std({ map: wt, roughness: 0.8, metalness: 0.25, side: THREE.BackSide })); room.position.y = 120; room.receiveShadow = true; B.dyn.add(room);
@@ -90,7 +90,7 @@ function bigHall() {
   for (let i = 0; i < 12; i++) B.box(60, 18, 1.2, doorM, 0, 9 + i * 18.5, -158);
   for (let i = 0; i < 12; i++) B.box(60.5, 0.4, 1.5, dark, 0, 18.2 + i * 18.5, -158);
   B.box(4, 226, 2, hz, -32, 113, -157.5); B.box(4, 226, 2, hz, 32, 113, -157.5); B.box(68, 4, 2, hz, 0, 226, -157.5);
-  B.dyn.add(Object.assign(new THREE.Mesh(new THREE.PlaneGeometry(1.2, 222), glow(0xfff6e0, 3)), { position: new THREE.Vector3(0, 111, -157.3) }));
+  { const gap = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 222), glow(0xfff6e0, 3)); gap.position.set(0, 111, -157.3); B.dyn.add(gap); }
   // big BSP banners hanging on the side walls
   const logo = std({ map: logoTex(), roughness: 0.85, side: THREE.DoubleSide });
   for (const [x, z, ry] of [[-150, -60, Math.PI / 2], [-150, 60, Math.PI / 2], [150, -60, -Math.PI / 2], [150, 60, -Math.PI / 2]]) { const b = new THREE.Mesh(new THREE.PlaneGeometry(24, 48), logo); b.position.set(x, 150, z); b.rotation.y = ry; B.dyn.add(b); B.box(0.6, 0.6, 26, steel, x, 174.5, z); }
@@ -131,7 +131,7 @@ function barn() {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(2 * R, L), std({ map: groundTex('concrete_floor_02', 10), normalMap: groundTex('concrete_floor_02', 8, true), roughness: 0.85, color: 0x9a9080 }));
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; B.dyn.add(floor);
   const hz = std({ map: hazardTex(), roughness: 0.7 });
-  for (const [x, z, w, d] of [[0, -12, 24, 0.8], [0, 12, 24, 0.8], [-12, 0, 0.8, 24], [12, 0, 0.8, 24]]) { const m = B.box(w, 0.05, d, hz, x, 0.03, z); const uv = m.geometry.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 3); }
+  for (const [x, z, ry] of [[0, -12, 0], [0, 12, 0], [-12, 0, Math.PI / 2], [12, 0, Math.PI / 2]]) { const m = B.box(24.8, 0.05, 0.8, hz, x, 0.03, z, ry); const uv = m.geometry.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 3); }
   // arched ribs
   const rib = std({ color: 0x5a5e62, metalness: 0.7, roughness: 0.5 });
   for (let z = -L / 2 + 10; z < L / 2; z += 12) for (let k = 0; k < 24; k++) { const a1 = k / 24 * Math.PI, a2 = (k + 1) / 24 * Math.PI; B.beam([Math.cos(a1) * (R - 0.6), Math.sin(a1) * (R - 0.6), z], [Math.cos(a2) * (R - 0.6), Math.sin(a2) * (R - 0.6), z], 0.6, rib); }
