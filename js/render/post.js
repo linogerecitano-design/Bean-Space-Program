@@ -205,14 +205,15 @@ export class Pipeline {
             return max(base, max(anvil, cirrus));
           }
           if (A.stack > 3.5) { // gas giant: a continuous sea of billowing cloud with towers over the storms
-            float lum = dot(gasBand(A, d, lod), vec3(0.3, 0.5, 0.2));
-            float core; vec3 dS = swirl(d, core); gCore = core;      // the sea wraps around the big vortices
+            bool gg = A.stack < 4.5;                                     // gas giant (else a Venus/Titan-like overcast world)
+            float lum = gg ? dot(gasBand(A, d, lod), vec3(0.3, 0.5, 0.2)) : 0.5 + 0.35 * (nz(d * A.Rb / (thick * 30.0), thick * 30.0).g - 0.5);
+            float core = 0.0; vec3 dS = gg ? swirl(d, core) : d; gCore = core;      // the sea wraps around the big vortices
             vec3 qs = dS * A.Rb; vec3 gw = wind * 25.0; q = dS * r;
             // local deck level (in deck heights): rolling swells, brighter zones higher, towers over storms
             float swell = nz((qs + gw) / (thick * 3.5), thick * 3.5).r;
             float sc = nz((qs + gw) / (thick * 2.6), thick * 2.6).b; float storm = smoothstep(0.52, 0.85, sc); storm = sqrt(storm) * storm; // convective towers: domed, a few hundred km across
             float arms = nz(qs / (thick * 25.0), thick * 25.0).r * 0.7 + nz(qs / (thick * 9.0), thick * 9.0).g * 0.3; // wound into spirals in a vortex
-            gStorm = (0.3 + 0.7 * storm) * (1.0 - core);
+            gStorm = gg ? (0.3 + 0.7 * storm) * (1.0 - core) : 0.0;
             float base = 0.1 + 0.2 * swell + (lum - 0.5) * 0.2 + storm * 0.3 + core * (0.06 + 0.2 * smoothstep(0.35, 0.7, arms));
             // billows: a 3D noise volume thresholded against height, so the tops are rounded, overhanging cauliflower
             // heads rather than peaks (below the deck level it is solid, above it only the strongest lobes rise)
@@ -259,13 +260,14 @@ export class Pipeline {
         float cover2D(Atmo A, vec4 L) {
           if (A.stack > 0.5 && A.stack < 1.5) return clamp(max(L.r * 1.05, max(L.g, L.b * 0.35)), 0.0, 1.0);
           if (A.stack > 1.5 && A.stack < 2.5) return clamp(max(L.r, L.g) * 1.1, 0.0, 1.0);
-          if (A.stack > 2.5) return clamp(max(L.r * 0.3, L.b * 0.5), 0.0, 1.0);
+          if (A.stack > 4.5) return 1.0; // overcast worlds: an unbroken deck
+          if (A.stack > 2.5 && A.stack < 3.5) return clamp(max(L.r * 0.3, L.b * 0.5), 0.0, 1.0);
           return L.r;
         }
         // Distant clouds: a single textured shell at mid-deck height, lit with a soft terminator
         // and self-shadowing. Cheap, and free of the sampling noise a coarse raymarch has.
         vec4 clouds2D(Atmo A, vec3 rd, float sd, vec3 sunT, float tMin) {
-          if (A.stack > 3.5) return vec4(0.0);
+          if (A.stack > 3.5 && A.stack < 4.5) return vec4(0.0); // gas giants: the planet itself shows the banded deck
           float Rm = mix(A.Rb, A.Rt, 0.35); float c2 = dot(A.C, A.C) - Rm * Rm;
           vec2 tm = raySphere(rd, A.C, c2); if (tm.y < 0.0 || tm.x > 1e29) return vec4(0.0);
           float t = tm.x > 0.0 ? tm.x : tm.y;
@@ -294,7 +296,7 @@ export class Pipeline {
           vec3 c = uSunColor * A.cloudColor * (sunT * lit * 0.55 + amb);
           if (A.stack > 0.5 && A.stack < 1.5) { float st = smoothstep(0.55, 0.9, layersAt(A, dW, lod).g); if (st > 0.02) c += lightningAt(A, q, 0.3) * st * 20.0; } // thunderstorms seen from orbit
           float a = clamp(cov * (A.opaque > 0.5 ? 1.2 : 1.1), 0.0, 1.0);
-          if (A.stack > 2.5) a *= 0.3; // Mars: thin water-ice wisps and dust haze, never thick decks
+          if (A.stack > 2.5 && A.stack < 3.5) a *= 0.3; // Mars: thin water-ice wisps and dust haze, never thick decks
           a *= tailK;
           return vec4(c * a, a);
         }
@@ -389,7 +391,7 @@ export class Pipeline {
                   }
                   float Ti = exp(-d * sigma * dt);
                   vec3 tint = A.cloudColor;
-                  if (A.stack > 3.5) { vec3 dq = normalize(A.w2b * (p - A.C)); vec3 bc = gasBand(A, dq, 1.0); bc = mix(vec3(dot(bc, vec3(0.3, 0.5, 0.2))), bc, 1.35); tint = mix(bc * 1.1, vec3(1.0, 0.97, 0.92), 0.1 * aoHere * (1.0 - coreHere * 0.85)); } // whiter ammonia-ice tops, but storms keep their colour
+                  if (A.stack > 3.5 && A.stack < 4.5) { vec3 dq = normalize(A.w2b * (p - A.C)); vec3 bc = gasBand(A, dq, 1.0); bc = mix(vec3(dot(bc, vec3(0.3, 0.5, 0.2))), bc, 1.35); tint = mix(bc * 1.1, vec3(1.0, 0.97, 0.92), 0.1 * aoHere * (1.0 - coreHere * 0.85)); } // whiter ammonia-ice tops, but storms keep their colour
                   c3 += T3 * (1.0 - Ti) * lightC * tint;
                   if (stormHere > 0.02) c3 += T3 * (1.0 - Ti) * lightningAt(A, A.w2b * (p - A.C), hf) * stormHere * (gas ? 5.0 * smoothstep(thick * 3.0, thick * 10.0, t) : 22.0); // up close the real bolts take over
                   if (uBolt.w > 0.001) { vec3 db = p - uBolt.xyz; c3 += T3 * (1.0 - Ti) * vec3(0.75, 0.82, 1.0) * uBolt.w * 40.0 * exp(-dot(db, db) / (uBoltR * uBoltR)); } // a visible bolt lights its cloud

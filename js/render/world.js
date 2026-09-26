@@ -314,8 +314,14 @@ export class World {
         const pre = b.cloudStack.preset;
         b._clouds.map = b.cloudStack.tex; b._clouds.stack = pre === 'earth' ? 1 : pre === 'venus' ? 2 : 3;
         if (pre === 'earth') { b._clouds.height = 400 * k; b._clouds.thickness = 12000 * k; b._clouds.opaque = false; }
-        else if (pre === 'venus') { b._clouds.height = 45000; b._clouds.thickness = 25000; b._clouds.opaque = true; }
+        else if (pre === 'venus') { b._clouds.height = 45000; b._clouds.thickness = 25000; b._clouds.opaque = true; b._clouds.stack = 5; }
         else { b._clouds.height = 1500 * k; b._clouds.thickness = 30000 * Math.min(1.5, k); b._clouds.opaque = false; b._clouds.color = [1.0, 0.88, 0.78]; }
+      }
+      // Venus- and Titan-like worlds: an unbroken sea of billowing cloud like the gas giants' (in their own colour)
+      if (!b.cloudStack || b.cloudStack.preset === 'venus') {
+        const c = b._clouds, venusy = b.name === 'Venus' || (c.opaque && !c.haze && c.coverage >= 0.95), titany = c.haze || b.name === 'Titan';
+        if (venusy) { c.stack = 5; c.height = 45000; c.thickness = 25000; }
+        else if (titany) { c.stack = 5; c.height = 22000; c.thickness = 40000; }
       }
     }
     return b._clouds;

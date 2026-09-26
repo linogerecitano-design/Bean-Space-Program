@@ -267,7 +267,10 @@ export class LaunchFX {
     const rl = Math.hypot(bf[0], bf[1], bf[2]);
     if (body.hasSurface && body.surface) { const gh = body.surface.height(bf[0] / rl, bf[1] / rl, bf[2] / rl); c.ground = body.radius + gh - rl; }
     this.clouds.push(c);
-    while (this.clouds.length > this.maxClouds) { const o = this.clouds.shift(); this.world.volScene.remove(o.mesh); }
+    // too many: the oldest start fading out (dropping them outright made whole plumes pop out of existence)
+    const live = this.clouds.filter(o => !o.fading);
+    for (let i = 0; i < live.length - this.maxClouds; i++) live[i].fading = true;
+    while (this.clouds.length > this.maxClouds + 4) { const o = this.clouds.shift(); this.world.volScene.remove(o.mesh); }
     return c;
   }
   cloudWorld(c, t, camPos, outPos, outQ) {
@@ -322,10 +325,10 @@ export class LaunchFX {
           const base = toLocal(exitRel); base.y = c.ground + r0 * 0.4;
           const lobe = Math.random() < 0.75 ? (Math.random() < 0.5 ? 0 : Math.PI) : Math.random() * Math.PI * 2;
           const ang = lobe + (Math.random() - 0.5) * 0.9; const sp = (18 + 30 * Math.random()) * Math.min(1, thrust / 5e6 + 0.4);
-          c.puffs.push({ p: base, v: new THREE.Vector3(Math.cos(ang) * sp, 2 + Math.random() * 3, Math.sin(ang) * sp), r: r0 * 0.6, r1: r0 * (2.2 + Math.random() * 1.6), age: 0, life: 28 + Math.random() * 18, dens: 0.9 * Math.min(1.4, sk + 0.5), heat: 1 });
+          c.puffs.push({ p: base, v: new THREE.Vector3(Math.cos(ang) * sp, 2 + Math.random() * 3, Math.sin(ang) * sp), r: r0 * 0.6, r1: r0 * (2.2 + Math.random() * 1.6), age: 0, life: 140 + Math.random() * 90, dens: 0.9 * Math.min(1.4, sk + 0.5), heat: 1 });
         } else {
           const p = toLocal(exitRel); const back = toLocal(exitRel.clone().addScaledVector(nose, -r0)).sub(p).normalize();
-          c.puffs.push({ p: p.addScaledVector(back, r0 * 0.6), v: back.multiplyScalar(8), r: r0 * 0.5, r1: r0 * (1.6 + Math.random() * 0.8) * (1 + (1 - air) * 1.5), age: 0, life: 14 + Math.random() * 8, dens: 0.75 * sk, heat: 0.8 });
+          c.puffs.push({ p: p.addScaledVector(back, r0 * 0.6), v: back.multiplyScalar(8), r: r0 * 0.5, r1: r0 * (1.6 + Math.random() * 0.8) * (1 + (1 - air) * 1.5), age: 0, life: 70 + Math.random() * 40, dens: 0.75 * sk, heat: 0.8 });
         }
       }
     }
@@ -335,10 +338,12 @@ export class LaunchFX {
     for (const c of this.clouds) {
       c.age += dt;
       for (const p of c.puffs) {
-        p.age += dt;
+        p.age += dt * (c.fading ? 8 : 1); // a cloud pushed out by newer ones fades away over ~20 s instead of vanishing
         p.p.addScaledVector(p.v, dt); p.v.multiplyScalar(Math.exp(-dt * 0.55));
         p.v.y += (p.heat * 4 + 0.35) * dt; p.v.x += 0.6 * dt; // buoyancy and a light breeze
-        p.r += (p.r1 - p.r) * Math.min(1, dt * 0.35); p.heat *= Math.exp(-dt * 0.9);
+        // billows out quickly, then keeps slowly spreading for the rest of its life as it mixes with the air
+        const grow = p.r1 * (1 + 1.8 * p.age / p.life);
+        p.r += (grow - p.r) * Math.min(1, dt * (p.r < p.r1 ? 0.35 : 0.05)); p.heat *= Math.exp(-dt * 0.9);
         if (p.p.y - p.r * 0.35 < c.ground) p.p.y = c.ground + p.r * 0.35;
       }
       c.puffs = c.puffs.filter(p => p.age < p.life);
@@ -347,7 +352,7 @@ export class LaunchFX {
       c.mesh.visible = true;
       const mn = new THREE.Vector3(Infinity, Infinity, Infinity), mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
       c.puffs.forEach((p, i) => {
-        const fade = Math.min(1, p.age / 0.4) * (1 - Math.max(0, (p.age - p.life * 0.6) / (p.life * 0.4)));
+        const fade = Math.min(1, p.age / 0.4) * (1 - THREE.MathUtils.smoothstep(p.age, p.life * 0.3, p.life)); // thins out gradually
         U.uPuff.value[i].set(p.p.x, p.p.y, p.p.z, p.r);
         U.uPuffB.value[i].set(p.dens * fade * Math.pow(p.r1 / Math.max(p.r, 0.1), 0.6) * 0.6, p.age, 0, p.heat);
         mn.min(_v.set(p.p.x - p.r, p.p.y - p.r, p.p.z - p.r)); mx.max(_v.set(p.p.x + p.r, p.p.y + p.r, p.p.z + p.r));

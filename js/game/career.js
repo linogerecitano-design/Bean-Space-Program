@@ -153,6 +153,7 @@ add('escape', 'Escape velocity', 'Go faster than 11.2 km/s', 30, (s) => s.maxOrb
 add('firstLaunch', 'Liftoff', 'Leave the launch pad', 5, (s) => s.launched, 'Milestones');
 add('firstScience', 'Curiosity', 'Run your first experiment', 5, (s, g) => Object.keys(g.science || {}).length > 0, 'Milestones');
 add('firstEva', 'Out the hatch', 'Take a Bean on an EVA', 15, (s) => s.eva, 'Milestones');
+add('firstDock', 'Docking!', 'Dock two vessels together', 30, (s) => s.docked, 'Milestones');
 add('flag', 'Plant a flag', 'Plant a flag anywhere', 10, (s, g) => (g.flags || []).length > 0, 'Milestones');
 add('chuteLanding', 'Soft landing', 'Land or splash down under parachutes', 10, (s) => s.chuteLanding, 'Milestones');
 add('reentry', 'Fire from the sky', 'Survive re-entry heating of 1000+', 20, (s) => s.maxHeat >= 1000 && s.survivedHeat, 'Milestones');
@@ -169,7 +170,7 @@ for (const [b, k] of Object.entries(BODY_MULT)) {
 export const ACHIEVEMENTS = A;
 
 // per-flight record (lives on the flight scene)
-export const newFlightRecord = () => ({ maxAlt: 0, maxVsAir: 0, maxHsAir: 0, maxOrbV: 0, maxHeat: 0, survivedHeat: false, orbited: [], soi: [], landedOn: [], launched: false, eva: false, chuteLanding: false, flightTime: 0, interstellar: false, home: false });
+export const newFlightRecord = () => ({ maxAlt: 0, maxVsAir: 0, maxHsAir: 0, maxOrbV: 0, maxHeat: 0, survivedHeat: false, orbited: [], soi: [], landedOn: [], launched: false, eva: false, chuteLanding: false, flightTime: 0, interstellar: false, home: false, docked: false });
 export function trackFlight(rec, v, dt) {
   if (!v) return;
   if (v.galactic) { rec.interstellar = true; return; }
@@ -227,7 +228,7 @@ const REACH = [['Moon', 3], ['Mars', 4], ['Venus', 4], ['Mercury', 5], ['Jupiter
 export function makeContract(game, r) {
   const tier = progressTier(game), g = GIVERS[Math.floor(r() * GIVERS.length)];
   const types = ['altitude', 'speed', 'science', 'recover'];
-  if (tier >= 1) types.push('orbit'); if (tier >= 2) types.push('soi', 'orbit', 'science'); if (tier >= 3) types.push('land', 'soi'); if (tier >= 4) types.push('land', 'orbit');
+  if (tier >= 1) types.push('orbit'); if (tier >= 2) types.push('soi', 'orbit', 'science', 'dock'); if (tier >= 3) types.push('land', 'soi'); if (tier >= 4) types.push('land', 'orbit');
   const type = types[Math.floor(r() * types.length)];
   const bodies = REACH.filter(([, t]) => t <= tier + 1).map(([b]) => b);
   const pickBody = () => bodies.length ? bodies[Math.floor(r() * bodies.length)] : 'Moon';
@@ -235,6 +236,7 @@ export function makeContract(game, r) {
   if (type === 'altitude') { const km = [[3, 10, 20, 35], [50, 80, 120], [200, 500, 1000]][Math.min(2, tier)]; const k = km[Math.floor(r() * km.length)]; c = { type, km: k, title: `Reach ${k} km`, text: `Take any vessel at least ${k} km above Earth.`, pay: 8000 + k * 900 }; }
   else if (type === 'speed') { const ms = [150, 300, 500, 800, 1200][Math.min(4, tier + Math.floor(r() * 2))]; c = { type, ms, title: `Go ${ms} m/s in the air`, text: `Fly faster than ${ms} m/s inside Earth's atmosphere.`, pay: 6000 + ms * 40 }; }
   else if (type === 'recover') { const km = tier === 0 ? 5 : tier === 1 ? 30 : 100; c = { type, km, crew: tier >= 1 && r() < 0.6, title: `${tier >= 1 ? 'Bring a Bean back' : 'Test flight'} from ${km} km`, text: `Reach ${km} km, then land and recover the vessel${tier >= 1 ? ' with its crew' : ''}.`, pay: 15000 + km * 1200 }; }
+  else if (type === 'dock') { c = { type, title: 'Dock two vessels', text: 'Launch two vessels with docking ports and dock them together in orbit.', pay: 140000 }; }
   else if (type === 'orbit') { const b = tier >= 2 && r() < 0.6 ? pickBody() : 'Earth'; c = { type, body: b, title: `Orbit ${b}`, text: `Put a vessel into a stable orbit around ${b}.`, pay: b === 'Earth' ? 90000 : round(180000 * bodyMult({ name: b, sys: { real: true } }) * 0.6) }; }
   else if (type === 'soi') { const b = pickBody(); c = { type, body: b, title: `Fly to ${b}`, text: `Reach ${b}'s sphere of influence.`, pay: round(120000 * bodyMult({ name: b, sys: { real: true } }) * 0.5) }; }
   else if (type === 'land') { const b = pickBody(); c = { type, body: b, title: `Land on ${b}`, text: `Touch down safely on ${b}.`, pay: round(300000 * bodyMult({ name: b, sys: { real: true } }) * 0.5) }; }
@@ -278,6 +280,7 @@ export function checkContracts(game, rec, v, event) {
     else if (c.type === 'soi') ok = rec.soi.includes(c.body);
     else if (c.type === 'land') ok = rec.landedOn.includes(c.body);
     else if (c.type === 'science') ok = event && event.science && event.science.kind === c.kind && event.science.body === c.body && event.science.sit === c.sit;
+    else if (c.type === 'dock') ok = !!rec.docked || !!(event && event.docked);
     else if (c.type === 'recover') ok = event && event.recovered && rec.maxAlt >= c.km * 1000 && (!c.crew || event.crewed);
     if (ok) done.push(c);
   }

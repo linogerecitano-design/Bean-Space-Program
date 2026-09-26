@@ -102,7 +102,7 @@ export class FlightScene {
     const G = this.G, v = this.vessel; if (!v || !G.game) return;
     const d = v.serialize(); d.starId = G.sys.starId; d.t = G.t;
     const i = G.game.vessels.findIndex(x => x.id === v.id); d.launchId = v.launchId || (i >= 0 ? G.game.vessels[i].launchId : undefined); if (i >= 0) G.game.vessels[i] = d; else G.game.vessels.push(d);
-    for (const o of this.others || []) { const k = G.game.vessels.findIndex(x => x.id === o.v.id); if (k >= 0) { const od = o.v.serialize(); od.starId = G.sys.starId; od.t = G.t; od.launchId = G.game.vessels[k].launchId; G.game.vessels[k] = od; } }
+    for (const o of this.others || []) { const k = G.game.vessels.findIndex(x => x.id === o.v.id); if (k >= 0) { const od = o.v.serialize(); od.starId = G.sys.starId; od.t = G.t; od.launchId = G.game.vessels[k].launchId; od.dock = o.v.dock || null; G.game.vessels[k] = od; } }
     G.game.t = G.t;
   }
   place(v, where) {
@@ -409,9 +409,20 @@ export class FlightScene {
       if (d.id === v.id || d.galactic || (d.starId || 'sol') !== G.sys.starId || d.body !== v.body?.name) continue;
       const ov = Vessel.deserialize(d, G.sys); if (!ov.body) continue;
       if (d.suited === false) ov.suited = false;
+      if (d.dock) ov.dock = d.dock;
       const o = this.addOther(ov, d.t ?? G.t);
-      this.updateOther(o);
-      if (o.v.r.dist(v.r) > 30e3) this.removeOther(o);
+      if (!(ov.dock && ov.dock.to === v.id)) this.updateOther(o);
+      if (o.v.r.dist(v.r) > 30e3 && !(ov.dock && ov.dock.to === v.id)) this.removeOther(o);
+    }
+    // a docked pair saved the other way round (we switched to the passive vessel): make the active one the carrier
+    const mine = G.game.vessels.find(x => x.id === v.id);
+    if (mine && mine.dock) {
+      const o = this.others.find(x => x.v.id === mine.dock.to);
+      if (o) { const d = mine.dock; const qA = new THREE.Quaternion().fromArray(d.qRel);
+        // we were at local d.local / qRel in the carrier's frame: invert that relation
+        const qi = qA.clone().invert(); const l = new THREE.Vector3(...d.local).applyQuaternion(qi).negate();
+        o.v.dock = { to: v.id, local: l.toArray(), qRel: qi.toArray() }; this.followDock(o); }
+      v.dock = null; mine.dock = null;
     }
   }
   addOther(ov, t0) {
@@ -429,8 +440,99 @@ export class FlightScene {
   removeOther(o) { this.root.remove(o.mesh); this.others = this.others.filter(x => x !== o); }
   updateOther(o) {
     const G = this.G, ov = o.v;
+    if (ov.dock && this.vessel && ov.dock.to === this.vessel.id) { this.followDock(o); return; }
     if (ov.landed && ov.landedBF) this.syncLanded(ov, G.t);
     else if (o.orbit) o.orbit.stateAt(G.t, ov.r, ov.v);
+  }
+  // ------------------------------------------------------------------ vessel-vessel contact & docking
+  // world-frame spheres roughly covering each attached part, and docking ports' faces
+  partSpheres(v) {
+    const out = [];
+    for (const p of v.livingParts()) {
+      const h = p.part.h || 1, rr = Math.max(p.part.d || 0.5, p.part.d2 || 0) / 2;
+      const loc = new THREE.Vector3(p.pl.pos[0] - v.com[0], p.pl.pos[1] - h / 2 - v.com[1], p.pl.pos[2] - v.com[2]);
+      const c = loc.clone().applyQuaternion(v.q);
+      const e = { p, c: new V3(v.r.x + c.x, v.r.y + c.y, v.r.z + c.z), r: Math.max(0.3, Math.min(rr, h * 0.75) * 0.95) };
+      if (p.part.dock) { // the port faces away from the rest of its vessel along the stack axis
+        const s = Math.sign(p.pl.pos[1] - h / 2 - v.com[1]) || 1;
+        const f = new THREE.Vector3(0, s, 0).applyQuaternion(v.q);
+        e.face = f; e.fc = new V3(e.c.x + f.x * h / 2, e.c.y + f.y * h / 2, e.c.z + f.z * h / 2);
+      }
+      out.push(e);
+    }
+    return out;
+  }
+  dockMass() { let m = 0; for (const o of this.others) if (o.v.dock && o.v.dock.to === this.vessel.id) m += o.v.mass; return m; }
+  followDock(o) {
+    const v = this.vessel, ov = o.v, d = ov.dock;
+    const l = new THREE.Vector3(...d.local).applyQuaternion(v.q);
+    ov.r = v.r.clone().add(new V3(l.x, l.y, l.z)); ov.v = v.v.clone(); ov.body = v.body;
+    ov.q.copy(v.q).multiply(new THREE.Quaternion().fromArray(d.qRel)); ov.w.set(0, 0, 0); ov.landed = v.landed;
+  }
+  // bump into (and dock with) nearby vessels; called once per physics frame
+  vesselContacts() {
+    const v = this.vessel;
+    if (!v || v.type === 'eva' || v.landed || !this.others.length) return;
+    let A = null;
+    for (const o of this.others) {
+      const ov = o.v; if (ov.type === 'eva' || ov.body !== v.body || (ov.dock && ov.dock.to === v.id)) continue;
+      this.updateOther(o); // bring it to this instant (at orbital speed a frame-old position is ~250 m off)
+      const reach = (v.height + v.maxR) + (ov.height + ov.maxR);
+      if (ov.r.dist(v.r) > reach) continue;
+      A = A || this.partSpheres(v); const B = this.partSpheres(ov);
+      // docking: two free ports face to face, close, slow
+      const rel = v.v.clone().sub(ov.v);
+      for (const a of A) if (a.face && !this.portBusy(v, a.p)) for (const b of B) if (b.face && !this.portBusy(ov, b.p)) {
+        const gap = a.fc.dist(b.fc), align = a.face.dot(b.face);
+        if (ov.undocking) { if (gap > 1.0) ov.undocking = false; continue; } // just undocked: drift clear first
+        if (gap < 0.35 + 0.25 * Math.min(a.r, b.r) && align < -0.96 && rel.len() < 1.2) { this.dock(o, a, b); return; }
+      }
+      // otherwise the hulls push each other apart (a simple impulse between overlapping part spheres)
+      const ma = (v.mass + this.dockMass()) * 1000, mb = ov.landed ? Infinity : ov.mass * 1000;
+      let hit = false;
+      for (const a of A) for (const b of B) {
+        const dx = a.c.x - b.c.x, dy = a.c.y - b.c.y, dz = a.c.z - b.c.z; const d = Math.hypot(dx, dy, dz), pen = a.r + b.r - d;
+        if (pen <= 0 || d < 1e-6) continue;
+        const n = new V3(dx / d, dy / d, dz / d); const vn = v.v.clone().sub(ov.v).dot(n);
+        const inv = 1 / ma + 1 / mb; const k = 1 / ma / inv;
+        v.r.addScaled(n, pen * k); if (mb !== Infinity) ov.r.addScaled(n, -pen * (1 - k));
+        if (vn < 0) {
+          const j = -(1 + 0.25) * vn / inv; v.v.addScaled(n, j / ma); if (mb !== Infinity) ov.v.addScaled(n, -j / mb);
+          if (-vn > 12) { a.p.broken = true; v.crashPart = a.p; } // a real crash, not a bump
+        }
+        hit = true;
+      }
+      if (hit && !ov.landed) o.orbit = Orbit.fromState(ov.body.mu, ov.r, ov.v, this.G.t);
+    }
+  }
+  portBusy(v, p) { return (v.dockPorts || []).includes(p.id ?? p.uid ?? p) || (p.dockedWith != null); }
+  dock(o, a, b) {
+    const G = this.G, v = this.vessel, ov = o.v;
+    // snap: the other vessel turns so the ports are exactly face to face, then moves so their faces meet
+    const qAlign = new THREE.Quaternion().setFromUnitVectors(b.face.clone(), a.face.clone().negate());
+    ov.q.premultiply(qAlign);
+    const B2 = this.partSpheres(ov).find(e => e.p === b.p);
+    ov.r.add(new V3(a.fc.x - B2.fc.x, a.fc.y - B2.fc.y, a.fc.z - B2.fc.z));
+    // momentum: the pair moves on together
+    const ma = v.mass + this.dockMass(), mb = ov.mass; const vv = v.v.clone().scale(ma).add(ov.v.clone().scale(mb)).scale(1 / (ma + mb)); v.v.copy(vv);
+    const qi = v.q.clone().invert(); const l = new THREE.Vector3(ov.r.x - v.r.x, ov.r.y - v.r.y, ov.r.z - v.r.z).applyQuaternion(qi);
+    ov.dock = { to: v.id, local: l.toArray(), qRel: qi.multiply(ov.q.clone()).toArray() };
+    a.p.dockedWith = ov.id; b.p.dockedWith = v.id;
+    flash(`Docked with ${ov.name}!`, 4000);
+    this.toastDock?.(ov);
+    if (isCareer(G.game)) { const rec = this.rec(); if (rec) rec.docked = true; this.careerTick(0, { docked: true }); }
+    this.persist();
+  }
+  undock(p) {
+    const v = this.vessel;
+    const o = this.others.find(x => x.v.dock && x.v.dock.to === v.id && (x.v.id === p.dockedWith || x.v.livingParts().some(q => q.dockedWith === v.id)));
+    if (!o) { p.dockedWith = null; return flash('Nothing docked here'); }
+    const ov = o.v; const port = this.partSpheres(v).find(e => e.p === p);
+    const push = port && port.face ? port.face : new THREE.Vector3(0, 1, 0);
+    ov.dock = null; ov.undocking = true; p.dockedWith = null; for (const q of ov.livingParts()) if (q.dockedWith === v.id) q.dockedWith = null;
+    ov.v = v.v.clone().add(new V3(push.x * 0.3, push.y * 0.3, push.z * 0.3)); v.v.addScaled(new V3(push.x, push.y, push.z), -0.3 * ov.mass / Math.max(v.mass, 0.01));
+    o.orbit = Orbit.fromState(ov.body.mu, ov.r, ov.v, this.G.t);
+    flash(`Undocked from ${ov.name}`); this.persist();
   }
   // ------------------------------------------------------------------ right-click / long-press part menus
   pickMenu(x, y) {
@@ -469,6 +571,8 @@ export class FlightScene {
       }
     }
     if (part.decoupler && active && p.attached) body.append(h('button.danger', { onclick: () => { const oldCom = v.com.slice(); const lost = v.separateAt(p); this.spawnDebris(lost, oldCom); this.applyDetach(); el.remove(); flash('Decoupled'); } }, 'Decouple'));
+    if (part.dock && active && p.dockedWith != null) body.append(h('button', { onclick: () => { this.undock(p); el.remove(); } }, 'Undock'));
+    else if (part.dock && active) body.append(h('div.small.dim', {}, 'Docking port: approach another port face-to-face below 1 m/s to dock.'));
     if (part.chute && active) body.append(h('button', { onclick: () => { p.deployed = true; refresh(); flash('Parachute armed'); } }, p.deployed ? 'Parachute armed' : 'Deploy parachute'));
     if (part.science && active && isCareer(this.G.game) && v.body) { const e = this.experiments().find(x => x.kind === part.science); if (e) body.append(h('button' + (e.tp ? '.primary' : ''), { onclick: () => { this.runExp(e); refresh(); } }, e.tp ? `Run ${e.name} (+${e.tp} TP)` : `${e.name}: ${e.ok ? 'done here' : 'n/a here'}`)); }
     if (part.mesh?.deploy && active) body.append(h('button', { onclick: () => { p.deployed = !p.deployed; refresh(); } }, p.deployed ? 'Retract solar array' : 'Deploy solar array'));
@@ -663,6 +767,7 @@ export class FlightScene {
     const h = simDt / n;
     const ctx = this.ctx();
     v.thrustMax = v.livingParts().reduce((s, p) => s + (p.active && p.part.engine ? p.part.engine.thrust * 1000 : 0), 0);
+    ctx.extraMass = this.others.length ? this.dockMass() : 0; // docked vessels ride along (their mass counts)
     for (let i = 0; i < n; i++) {
       G.t += h; ctx.t = G.t;
       if (v.type === 'eva') this.evaThrust(h);
@@ -671,6 +776,7 @@ export class FlightScene {
       this.checkSOI();
       if (v.galactic) return;
     }
+    this.vesselContacts();
     // settle onto the ground
     const surfV = v.v.clone().sub(v.body.surfaceVel(v.r));
     if (v.contact && surfV.len() < 0.4 && v.w.length() < 0.1 && (v.throttle === 0 || v.thrustN === 0)) { this.settle = (this.settle || 0) + simDt; if (this.settle > 1) { this.lockLanded(v, G.t); this.settle = 0; flash(`Landed on ${v.body.name}`); } } else this.settle = 0;

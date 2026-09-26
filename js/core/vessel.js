@@ -306,13 +306,13 @@ export class Vessel {
   }
   serialize() {
     return { id: this.id, name: this.name, type: this.type, design: this.design, stage: this.stage, crew: this.crew,
-      parts: this.parts.map(p => [p.attached ? 1 : 0, +p.fuel.toFixed(4), p.active ? 1 : 0, p.deployed ? 1 : 0, +(p.limit ?? 1).toFixed(3)]),
+      parts: this.parts.map(p => p.dockedWith != null ? [p.attached ? 1 : 0, +p.fuel.toFixed(4), p.active ? 1 : 0, p.deployed ? 1 : 0, +(p.limit ?? 1).toFixed(3), p.dockedWith] : [p.attached ? 1 : 0, +p.fuel.toFixed(4), p.active ? 1 : 0, p.deployed ? 1 : 0, +(p.limit ?? 1).toFixed(3)]),
       body: this.body?.name, r: this.r.toArray(), v: this.v.toArray(), q: this.q.toArray(), landed: this.landed, landedBF: this.landedBF, landedQ: this.landedQ,
-      situation: this.situation, throttle: this.throttle, sas: this.sas, sasMode: this.sasMode, galactic: this.galactic || null, suited: this.suited, grab: this.grab || null };
+      situation: this.situation, throttle: this.throttle, sas: this.sas, sasMode: this.sasMode, galactic: this.galactic || null, suited: this.suited, grab: this.grab || null, dock: this.dock || null };
   }
   static deserialize(d, sys) {
     const v = new Vessel(d.design, { id: d.id, type: d.type, crew: d.crew });
-    v.stage = d.stage; d.parts.forEach((a, i) => { const p = v.parts[i]; if (!p) return; p.attached = !!a[0]; p.fuel = a[1]; p.active = !!a[2]; p.deployed = !!a[3]; if (a[4] !== undefined) p.limit = a[4]; });
+    v.stage = d.stage; d.parts.forEach((a, i) => { const p = v.parts[i]; if (!p) return; p.attached = !!a[0]; p.fuel = a[1]; p.active = !!a[2]; p.deployed = !!a[3]; if (a[4] !== undefined) p.limit = a[4]; if (a[5] != null) p.dockedWith = a[5]; });
     v.recalc(); v.body = sys ? sys.get(d.body) : null; v.r = V3.from(d.r); v.v = V3.from(d.v); v.q.fromArray(d.q);
     v.landed = d.landed; v.landedBF = d.landedBF; v.landedQ = d.landedQ; v.situation = d.situation; v.throttle = 0; v.sas = d.sas; v.sasMode = d.sasMode || 'stability';
     v.galactic = d.galactic; v.suited = d.suited; v.grab = d.grab || null;
@@ -333,7 +333,7 @@ export function physicsStep(v, dt, ctx) {
   const tG = B.hasSurface ? B.terrainHeightAt(r, ctx.t) : 0; const sea = B.hasSurface ? B.seaLevel : null;
   const water = sea != null && tG < sea; const tH = water ? sea : tG; // oceans: float on the water, don't sink to the seabed
   // --- forces
-  const mkg = v.mass * 1000;
+  const mkg = (v.mass + (ctx.extraMass || 0)) * 1000; // (+ vessels docked to this one)
   const ax = new V3().addScaled(r, -B.mu / (rl * rl * rl));
   const thrust = v.engineState(dt, ctx);
   if (thrust > 0) v.updateMass();
