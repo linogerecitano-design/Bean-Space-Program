@@ -22,6 +22,7 @@ import { IS_MOBILE } from '../render/textures.js';
 import { bakeListeners } from '../gen/baker.js';
 import { graphicsDialog } from '../ui/graphics.js';
 import { makeShapePlasma, makeFireball } from '../render/vfx.js';
+import { ClothChute } from '../render/chuteCloth.js';
 import { beanier } from '../game/settings.js';
 import { LaunchFX, frostPatch } from '../render/volumetrics.js';
 import { blackbody } from '../render/glsl.js';
@@ -96,6 +97,7 @@ export class FlightScene {
     this.persist(); this.active = false; this.cam.enabled = false; document.querySelector('.part-menu')?.remove();
     if (this.lfx) this.lfx.clear();
     this.root.clear(); if (this.center && this.center.parent) this.center.parent.remove(this.center);
+    if (this.cloths) { for (const c of this.cloths.values()) c.dispose(); this.cloths.clear(); } this.prevV = null;
     for (const f of this.flags || []) f.parent && f.parent.remove(f);
     this.map.show(false); this.map.clear(); clearUI();
   }
@@ -1082,7 +1084,7 @@ export class FlightScene {
     if (this.lfx && v.type !== 'eva' && G.world.sunDir) this.lfx.update({ v, t: G.t, dt: dt * fxWarp, camPos, focusRel, pAtm, sunDir: G.world.sunDir });
     if (v.type !== 'eva') this.updateHullGlow();
     // chutes: simple canopy
-    this.updateChutes();
+    this.updateChutes(dt * fxWarp);
     // deployable solar arrays fold/unfold (and retract automatically in thick air)
     if (this.mesh.userData.parts) for (const m of this.mesh.userData.parts) {
       const wing = m.userData.wing; if (!wing) continue; const rt = m.userData.rt;
@@ -1144,15 +1146,33 @@ export class FlightScene {
     this.mesh.children.forEach(c => { if (c.userData.placed) c.position.set(c.userData.placed.pos[0] - v.com[0], c.userData.placed.pos[1] - v.com[1], c.userData.placed.pos[2] - v.com[2]); });
     for (const m of this.mesh.userData.parts || []) for (const pl of m.userData.plumes || []) { pl.visible = !!m.userData.rt.firing; pl.userData.U.uThrottle.value = m.userData.rt.firing || 0; pl.userData.U.uPressure.value = 0; pl.userData.U.uTime.value = performance.now() / 1000; }
   }
-  updateChutes() {
-    const v = this.vessel; if (!this.mesh.userData.parts) return;
+  // parachute canopies are cloth (render/chuteCloth.js): they inflate, swing, and drape after landing
+  updateChutes(dt) {
+    const v = this.vessel; if (!this.mesh.userData.parts || v.type === 'eva') return;
+    this.cloths ||= new Map();
+    const live = new Set();
+    // the vessel's acceleration (the canopy's frame moves with it) and its gravity
+    const vv = new THREE.Vector3(v.v.x, v.v.y, v.v.z); const accel = this.prevV && dt > 0 ? vv.clone().sub(this.prevV).divideScalar(Math.max(dt, 1e-3)) : new THREE.Vector3(); this.prevV = vv;
+    if (accel.length() > 200) accel.set(0, 0, 0); // a teleport or SOI change, not a real acceleration
+    const up = new THREE.Vector3(v.r.x, v.r.y, v.r.z).normalize(); const gW = up.clone().multiplyScalar(-v.body.mu / v.r.len2());
+    const gEff = gW.sub(accel);
+    const airV = v.v.clone().sub(v.body.surfaceVel(v.r)); const air = new THREE.Vector3(-airV.x, -airV.y, -airV.z);
+    const ground = v.body.hasSurface ? { up, h: v.body.radius + v.body.surfaceHeightAt(v.r, this.G.t) - v.r.len() + 0.1 } : null;
     for (const m of this.mesh.userData.parts) {
       const rt = m.userData.rt; if (!rt.part.chute) continue;
-      const open = rt.deployed && rt.attached && !rt.broken && v.rho > 1e-5;
-      if (open && !m.userData.canopy) { const c = makeCanopy(rt.part.chute.area); m.add(c); m.userData.canopy = c; }
-      if (m.userData.canopy) { m.userData.canopy.visible = open; if (open) { const k = Math.min(1, rt.openT / 3 || 0.1); m.userData.canopy.scale.setScalar(Math.max(0.05, k)); const air = v.v.clone().sub(v.body.surfaceVel(v.r)).norm(); const loc = new THREE.Vector3(-air.x, -air.y, -air.z).applyQuaternion(v.q.clone().invert()); m.userData.canopy.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), loc); } }
+      const out = rt.deployed && rt.attached && !rt.broken;
+      let c = this.cloths.get(rt);
+      if (!out) continue;
+      if (!c) { if (!(v.rho > 1e-5)) continue; c = new ClothChute(rt.part.chute.area, rt.part.chute.drogue ? 0xf0f0ea : 0xff7a1a); this.cloths.set(rt, c); this.root.add(c.group); }
+      live.add(rt);
+      // attachment: the chute part's top, in world axes relative to the centre of mass
+      const pl = rt.pl; const anchor = new THREE.Vector3(pl.pos[0] - v.com[0], pl.pos[1] - v.com[1] + 0.2, pl.pos[2] - v.com[2]).applyQuaternion(v.q);
+      c.step(dt, anchor, air, gEff, v.rho || 0, Math.min(1, (rt.openT || 0) / (rt.part.chute.drogue ? 1 : 3)), ground);
+      c.group.position.copy(this.mesh.position);
     }
+    for (const [rt, c] of this.cloths) if (!live.has(rt)) { this.root.remove(c.group); c.dispose(); this.cloths.delete(rt); }
   }
+
   // ------------------------------------------------------------------ HUD
   updateHUD() {
     const G = this.G, v = this.vessel; if (!v) return;
@@ -1208,13 +1228,3 @@ export class FlightScene {
 
 function fmtWarp(w) { return w >= 1e6 ? (w / 1e6) + 'M×' : w >= 1000 ? (w / 1000) + 'k×' : w + '×'; }
 function fmtDate(t) { const d = new Date(Date.UTC(2000, 0, 1, 12) + t * 1000); return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC'; }
-function makeCanopy(area) {
-  const r = Math.sqrt(area / Math.PI);
-  const g = new THREE.Group();
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 8, 0, Math.PI * 2, 0, Math.PI * 0.4), new THREE.MeshStandardMaterial({ color: 0xff7a1a, side: THREE.DoubleSide, roughness: 0.9 }));
-  dome.position.y = r * 2.2; g.add(dome);
-  const stripes = new THREE.Mesh(new THREE.SphereGeometry(r * 1.001, 24, 8, 0, Math.PI * 2, Math.PI * 0.25, Math.PI * 0.08), new THREE.MeshStandardMaterial({ color: 0xffffff, side: THREE.DoubleSide })); stripes.position.y = r * 2.2; g.add(stripes);
-  const pts = []; for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; pts.push(new THREE.Vector3(0, 0, 0), new THREE.Vector3(Math.cos(a) * r * 0.95, r * 2.2 + r * 0.3, Math.sin(a) * r * 0.95)); }
-  g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xdddddd })));
-  return g;
-}
