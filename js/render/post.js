@@ -334,7 +334,7 @@ export class Pipeline {
             if (farW < 0.999) {
               // march at most a few deck thicknesses, with steps packed near the camera; the rest of a
               // long grazing ray is handed to the 2D layer (a coarse march there only slices the noise)
-              float L = min(t1 - t0, thick * (A.stack > 3.5 ? 7.0 : 20.0)); int N = uSteps; // gas decks: dense steps where the billows are
+              float L = min(t1 - t0, thick * (A.stack > 4.5 ? 40.0 : A.stack > 3.5 ? 7.0 : 20.0)); int N = uSteps; // gas decks: dense steps where the billows are
               float jitter = ign(gl_FragCoord.xy);
               float cosT = dot(rd, uSunDir);
               float phase = mix(hg(cosT, 0.65), hg(cosT, -0.25), 0.3) * 4.0 + 0.4;
@@ -348,7 +348,7 @@ export class Pipeline {
               for (int i = 0; i < 160; i++) {
                 if (T3 < 0.02) break;
                 float t, dt;
-                if (gas) { if (i >= N * 5 || tg > t0 + L) break; t = tg; dt = dtg; }
+                if (gas) { if (i >= N * 6 || tg > t0 + L) break; t = tg; dt = dtg; }
                 else {
                   if (i >= N) break;
                   float u0 = (float(i) + jitter) / float(N), u1 = (float(i) + 1.0 + jitter) / float(N);
@@ -399,7 +399,7 @@ export class Pipeline {
                 }
               }
             }
-            float Lmax = thick * (A.stack > 3.5 ? 7.0 : 20.0);
+            float Lmax = thick * (A.stack > 4.5 ? 40.0 : A.stack > 3.5 ? 7.0 : 20.0); // overcast worlds: 3D right to the horizon (no seam)
             float tCut = t0 + min(t1 - t0, Lmax);
             bool tail = farW < 0.999 && t1 - t0 > Lmax;
             vec4 c2 = (farW > 0.001 || tail) ? clouds2D(A, rd, sd, sunT, farW > 0.001 ? 0.0 : tCut) : vec4(0.0);

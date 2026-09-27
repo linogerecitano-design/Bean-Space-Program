@@ -224,7 +224,7 @@ const SMOKE_K = { solid: 2.2, kerolox: 1.0, methalox: 0.75, hypergolic: 1.1, hyd
 export class LaunchFX {
   constructor(world, root) {
     this.world = world; this.root = root;
-    this.clouds = []; this.maxClouds = IS_MOBILE ? 5 : 10;
+    this.clouds = []; this.maxClouds = IS_MOBILE ? 7 : 14;
     this.flakes = new IceFlakes(); root.add(this.flakes.points);
     this.vapor = makeFrostVapor(); this.vapor.visible = false; world.volScene.add(this.vapor);
     this.frost = 0; this.frostU = null; this.lastEmit = null; this.t = 0;
@@ -254,6 +254,7 @@ export class LaunchFX {
     this.liftT = null;
   }
   clear() {
+    this.frost = 0; if (this.frostU) this.frostU.uFrost.value = 0; // (attach() sets it again for a fresh vehicle on the pad)
     for (const c of this.clouds) this.world.volScene.remove(c.mesh);
     this.clouds.length = 0; this.flakes.clear(); this.vapor.visible = false; this.lastEmit = null;
   }
@@ -268,7 +269,8 @@ export class LaunchFX {
     if (body.hasSurface && body.surface) { const gh = body.surface.height(bf[0] / rl, bf[1] / rl, bf[2] / rl); c.ground = body.radius + gh - rl; }
     this.clouds.push(c);
     // too many: the oldest start fading out (dropping them outright made whole plumes pop out of existence)
-    const live = this.clouds.filter(o => !o.fading);
+    // (the trail high up goes first; the big ground plume at the pad lingers longest)
+    const live = this.clouds.filter(o => !o.fading).sort((a, b) => (a.isGround ? 1 : 0) - (b.isGround ? 1 : 0));
     for (let i = 0; i < live.length - this.maxClouds; i++) live[i].fading = true;
     while (this.clouds.length > this.maxClouds + 4) { const o = this.clouds.shift(); this.world.volScene.remove(o.mesh); }
     return c;
@@ -312,7 +314,7 @@ export class LaunchFX {
         const groundBF = upBF.clone().multiplyScalar(rl - Math.max(0, hAbove));
         const anchor = ground ? groundBF : exitBF;
         let c = this.clouds[this.clouds.length - 1];
-        const lim = ground ? r0 * 16 : r0 * 10;
+        const lim = ground ? r0 * 16 : r0 * 24;
         if (!c || c.puffs.length >= MAXP || c.body !== v.body || new THREE.Vector3(...c.bf).distanceTo(anchor) > lim || (c.isGround !== ground)) {
           c = this.newCloud(v.body, anchor.toArray(), t, r0); c.isGround = ground;
         }
@@ -338,7 +340,7 @@ export class LaunchFX {
     for (const c of this.clouds) {
       c.age += dt;
       for (const p of c.puffs) {
-        p.age += dt * (c.fading ? 8 : 1); // a cloud pushed out by newer ones fades away over ~20 s instead of vanishing
+        p.age += dt * (c.fading ? 4 : 1); // a cloud pushed out by newer ones fades away over ~20 s instead of vanishing
         p.p.addScaledVector(p.v, dt); p.v.multiplyScalar(Math.exp(-dt * 0.55));
         p.v.y += (p.heat * 4 + 0.35) * dt; p.v.x += 0.6 * dt; // buoyancy and a light breeze
         // billows out quickly, then keeps slowly spreading for the rest of its life as it mixes with the air
