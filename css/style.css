@@ -311,3 +311,4 @@ body.compact #side.contracts { width: auto; }
 .save-txt { flex: 1; min-width: 0; } .save-txt b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .save-btns { display: flex; gap: 4px; flex: none; } .save-btns button { padding: 6px 10px; }
 body.compact .save-row { flex-wrap: wrap; } body.compact .save-btns { width: 100%; } body.compact .save-btns button.primary { flex: 1; }
+button.beanier { font-size: 12px; padding: 5px 10px; opacity: .75; }

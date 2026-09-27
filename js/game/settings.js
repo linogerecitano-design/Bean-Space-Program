@@ -24,3 +24,7 @@ export const settings = {
   set(p) { preset = p; try { localStorage.setItem(KEY, p); } catch (e) {} for (const f of listeners) try { f(); } catch (e) { console.error(e); } },
   onChange(f) { listeners.add(f); },
 };
+
+// Easter egg: "Beanier Beans" — astronauts flop about like ragdolls instead of standing up
+export function beanier() { try { return localStorage.getItem('bsp-beanier') === '1'; } catch (e) { return false; } }
+export function setBeanier(on) { try { localStorage.setItem('bsp-beanier', on ? '1' : '0'); } catch (e) {} }

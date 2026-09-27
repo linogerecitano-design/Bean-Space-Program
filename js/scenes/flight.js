@@ -22,6 +22,7 @@ import { IS_MOBILE } from '../render/textures.js';
 import { bakeListeners } from '../gen/baker.js';
 import { graphicsDialog } from '../ui/graphics.js';
 import { makeShapePlasma, makeFireball } from '../render/vfx.js';
+import { beanier } from '../game/settings.js';
 import { LaunchFX, frostPatch } from '../render/volumetrics.js';
 import { blackbody } from '../render/glsl.js';
 
@@ -777,6 +778,21 @@ export class FlightScene {
       if (v.galactic) return;
     }
     this.vesselContacts();
+    // Beans stand on their feet: once they touch down they are stood upright (keeping their heading) and
+    // planted, instead of toppling over like a 1.85 m pencil on springs ("Beanier Beans" keeps the flop)
+    if (v.type === 'eva' && !v.grab && v.body.hasSurface && !beanier()) {
+      const up = v.r.clone().norm(); const agl = v.r.len() - v.body.radius - v.body.surfaceHeightAt(v.r, G.t) - 0.92;
+      const vs = v.v.clone().sub(v.body.surfaceVel(v.r)).dot(up); const m = this.evaMove;
+      if (agl < 0.25 && vs < 3 && !(m && m.up > 0)) {
+        const U = new THREE.Vector3(up.x, up.y, up.z); const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(v.q).addScaledVector(U, -new THREE.Vector3(0, 0, 1).applyQuaternion(v.q).dot(U));
+        const qUp = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), U);
+        if (fwd.lengthSq() > 1e-6) { const look = new THREE.Vector3(0, 0, 1).applyQuaternion(qUp); fwd.normalize(); qUp.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(new THREE.Vector3().crossVectors(look, fwd).dot(U), look.dot(fwd)))); }
+        v.q.copy(qUp); v.r = up.scale(v.body.radius + v.body.surfaceHeightAt(v.r, G.t) + 0.92); v.v.copy(v.body.surfaceVel(v.r)); v.w.set(0, 0, 0);
+        this.lockLanded(v, G.t); this.settle = 0;
+        if (this.astro) this.astro.state = 'idle';
+        return;
+      }
+    }
     // settle onto the ground
     const surfV = v.v.clone().sub(v.body.surfaceVel(v.r));
     if (v.contact && surfV.len() < 0.4 && v.w.length() < 0.1 && (v.throttle === 0 || v.thrustN === 0)) { this.settle = (this.settle || 0) + simDt; if (this.settle > 1) { this.lockLanded(v, G.t); this.settle = 0; flash(`Landed on ${v.body.name}`); } } else this.settle = 0;
@@ -877,11 +893,14 @@ export class FlightScene {
     if (this.astro) { this.astro.gravity = g; this.astro.speed = speed; }
   }
   evaThrust(h) {
-    const v = this.vessel, m = this.evaMove; if (!m || v.contact) return;
+    const v = this.vessel, m = this.evaMove; if (!m || (v.contact && beanier())) return; // (the jetpack works from the ground too)
     const camF = new THREE.Vector3(); this.G.world.camera.getWorldDirection(camF);
     const up = this.G.world.camera.up.clone(); const right = new THREE.Vector3().crossVectors(camF, up).normalize(); const u2 = new THREE.Vector3().crossVectors(right, camF);
-    const dir = camF.multiplyScalar(m.fwd).addScaledVector(right, m.side).addScaledVector(u2, m.up);
-    if (dir.lengthSq() > 0) { dir.normalize().multiplyScalar(0.6 * h); v.v.add(new V3(dir.x, dir.y, dir.z)); }
+    // near the ground "up" means straight up (the camera's up is only meaningful floating in space)
+    const B = v.body; const rv = v.r.clone().norm(); const agl = B && B.hasSurface ? v.r.len() - B.radius - B.surfaceHeightAt(v.r, this.G.t) : Infinity;
+    const upDir = agl < 5000 ? new THREE.Vector3(rv.x, rv.y, rv.z) : u2;
+    const dir = camF.multiplyScalar(m.fwd).addScaledVector(right, m.side).addScaledVector(upDir, m.up);
+    if (dir.lengthSq() > 0) { dir.normalize().multiplyScalar(4 * h); v.v.add(new V3(dir.x, dir.y, dir.z)); } // 4 m/s²: hops on the Moon and Mars, not on Earth
   }
   stepRails(simDt) {
     const G = this.G, v = this.vessel;

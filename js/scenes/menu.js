@@ -4,6 +4,7 @@ import { V3 } from '../core/math.js';
 import { newGame, importCode, exportCode, downloadSave, cloud, saveLocal, listSaves, loadSave, deleteSave, ensureSlot } from '../game/save.js';
 import { PART_COUNT } from '../data/parts.js';
 import { graphicsDialog } from '../ui/graphics.js';
+import { beanier, setBeanier } from '../game/settings.js';
 
 export class MenuScene {
   constructor(G) { this.G = G; this.a = 0; }
@@ -22,6 +23,7 @@ export class MenuScene {
       h('button', { onclick: () => G.go('galaxy', { from: 'menu' }) }, 'Explore the Galaxy'),
       h('button', { onclick: () => graphicsDialog() }, 'Graphics'),
       h('button', { onclick: () => this.credits() }, 'Controls & Credits'),
+      h('button.beanier', { onclick: (e) => { setBeanier(!beanier()); e.target.textContent = '🫘 Beanier Beans: ' + (beanier() ? 'ON' : 'off'); flash(beanier() ? 'The Beans have gone floppy.' : 'The Beans stand up straight again.'); } }, '🫘 Beanier Beans: ' + (beanier() ? 'ON' : 'off')),
       h('div.dim.small', {}, cloud.available() ? '☁ Cloud sync active — progress follows you across devices.' : 'Saves are stored on this device. Use Saves & Sync to move them to another device.'));
     mount(menu);
     G.t = G.game ? G.game.t : G.t;
