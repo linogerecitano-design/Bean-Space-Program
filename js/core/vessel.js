@@ -186,7 +186,8 @@ export class Vessel {
       const w = p.part.wing; if (!w || !p.pl.radial) continue;
       const a = p.pl.ang, ca = Math.cos(a), sa = Math.sin(a), [x, y, z] = p.pl.pos;
       const AR = 2 * w.span * w.span / w.area; // a half-wing on a fuselage acts like a full wing of twice the span
-      this.wings.push({ p, w, c: new THREE.Vector3(x + w.ac[0] * ca, y + w.ac[1], z - w.ac[0] * sa), n: new THREE.Vector3(sa, 0, ca), en: new THREE.Vector3(0, -1, 0),
+      const inc = (w.inc || 0) * ca; // incidence lifts toward +Z (a horizontal wing's normal is ±Z; fins get none)
+      this.wings.push({ p, w, c: new THREE.Vector3(x + w.ac[0] * ca, y + w.ac[1], z - w.ac[0] * sa), n: new THREE.Vector3(sa * Math.cos(inc), -Math.sin(inc), ca * Math.cos(inc)), en: new THREE.Vector3(0, -1, 0),
         cla: w.grid ? 2.5 : 2 * Math.PI * AR / (AR + 2), ki: 1 / (Math.PI * AR * 0.8) });
     }
     this.wheels = this.livingParts().some(p => p.part.gear);
@@ -282,7 +283,7 @@ export class Vessel {
       let isp = e.isp + (e.ispSL - e.isp) * k;
       if (e.power) thrust *= powerFrac;
       if (e.air) { // jets need oxygen: thrust follows air density, and fades out toward the engine's top speed
-        const rho = this.body && this.body.atmo && this.body.breathable ? (this.rho || 0) : 0, M = (this.airspeed || 0) / 340;
+        const B = this.body, rho = B && B.atmo && B.breathable ? B.atmoDensity(Math.max(0, this.r.len() - B.radius)) : 0, M = (this.airspeed || 0) / 340;
         const fM = (m) => Math.max(0, (1 + 0.45 * M) * (1 - Math.pow(M / (m * 1.25), 3)));
         if (e.air.hybrid) { // SABRE: breathes air up to about Mach 5.4, then closes the intake and runs as a rocket
           p.airMode = rho > 0.02 && M < e.air.mach;
@@ -370,9 +371,10 @@ export function physicsStep(v, dt, ctx) {
   if (thrust > 0) v.updateMass();
   const nose = vesselUp(v, _v);
   // control command (local axes: pitch about X, roll about Y, yaw about Z) from the pilot and SAS
-  const tIn = new THREE.Vector3(v.input.pitch, v.input.roll, v.input.yaw);
-  if (v.sas && v.hasControl) tIn.add(sasInput(v, ctx));
-  tIn.clampScalar(-1, 1);
+  const tIn = new THREE.Vector3(v.input.pitch, v.input.roll, v.input.yaw), aIn = tIn.clone();
+  // SAS is tuned for reaction wheels; control surfaces have far more authority, so they get a gentler share of it
+  if (v.sas && v.hasControl) { const sI = sasInput(v, ctx); tIn.add(sI); aIn.addScaledVector(sI, 0.15); }
+  tIn.clampScalar(-1, 1); aIn.clampScalar(-1, 1);
   if (thrust > 0) ax.addScaled(new V3(nose.x, nose.y, nose.z), thrust / mkg);
   // RCS translation
   if (v.rcs && (v.input.x || v.input.y || v.input.z)) {
@@ -403,7 +405,7 @@ export function physicsStep(v, dt, ctx) {
       ax.addScaled(vn, -D / mkg);
       v.dragN = D;
       // wings and fins: lift, drag and control torque from each surface
-      if (v.wings.length) { const Fw = aeroSurfaces(v, airV, rho, tIn, dt); ax.addScaled(Fw, 1 / mkg); }
+      if (v.wings.length) { const Fw = aeroSurfaces(v, airV, rho, aIn, dt); ax.addScaled(Fw, 1 / mkg); }
       // aerodynamic torque toward stable orientation (bodies without lifting surfaces)
       const stableAxis = v.hasFins > 0 || v.cd < 0.4 ? 1 : v.heatshield && v.height < 8 ? -1 : 0.25;
       const want = new THREE.Vector3(vn.x, vn.y, vn.z).multiplyScalar(stableAxis >= 0 ? 1 : -1);
@@ -543,11 +545,16 @@ function aeroSurfaces(v, airV, rho, cmd, dt) {
     const force = (dfl, out) => { out.set(0, 0, 0); plate(s, s.n, _u, sp, 1 - ctrl, out); if (ctrl > 0) { _n2.copy(s.n).multiplyScalar(Math.cos(dfl)).addScaledVector(s.en, Math.sin(dfl)); plate(s, _n2, _u, sp, ctrl, out); } return out; };
     let want = 0;
     if (ctrl > 0 && cmdOn) {
-      const dmax = s.w.defl * Math.min(1, 6000 / (0.5 * rho * sp * sp + 1)); // fly-by-wire: smaller throws at high dynamic pressure
-      const t1 = _t.crossVectors(_r, force(dmax, _f)).clone(); const t2 = _t.crossVectors(_r, force(-dmax, _f));
-      t1.sub(t2); const tl = t1.length(); if (tl > 1e-9) want = Math.max(-1, Math.min(1, t1.dot(cmd) / tl * 1.5)) * dmax;
+      const dmax = s.w.defl * Math.min(1, 10000 / (0.5 * rho * sp * sp + 1)); // fly-by-wire: smaller throws at high dynamic pressure
+      const f1 = force(dmax, _f).clone(), t1 = _t.crossVectors(_r, f1).clone(); const f2 = force(-dmax, _f), t2 = _t.crossVectors(_r, f2);
+      t1.sub(t2); const df = f1.sub(f2).length();
+      // only use a surface on the axes it has real leverage on: ailerons near the centre of mass mustn't pitch
+      // (they would just dump the wing's lift)
+      const arm = 1.2 + 0.05 * v.height;
+      const ux = Math.abs(t1.x) > df * arm ? t1.x : 0, uy = Math.abs(t1.y) > df * arm ? t1.y : 0, uz = Math.abs(t1.z) > df * arm ? t1.z : 0;
+      const tl = t1.length(); if (tl > 1e-9) want = Math.max(-1, Math.min(1, (ux * cmd.x + uy * cmd.y + uz * cmd.z) / tl * 1.5)) * dmax;
     }
-    s.p.defl = (s.p.defl || 0) + (want - (s.p.defl || 0)) * Math.min(1, dt * 10);
+    s.p.defl = (s.p.defl || 0) + (want - (s.p.defl || 0)) * Math.min(1, dt * 6);
     force(s.p.defl, _f).multiplyScalar(Q);
     Fl.add(_f); T.add(_t.crossVectors(_r, _f));
     const rl = _r.length(); K += Q * s.cla * rl; C += Q * s.cla * rl * rl / sp;

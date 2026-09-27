@@ -197,18 +197,18 @@ export function buildPartMesh(p) {
       }
       break;
     }
-    case 'cockpit': { // pointed nose with the canopy on the -Z side (the belly, where the gear goes, is +Z)
+    case 'cockpit': { // pointed nose with the canopy on the +Z side (the belly, where the gear goes, is -Z)
       const Ln = h * (m.airliner ? 0.45 : m.orbiter ? 0.4 : 0.7), pts = [];
       for (let i = 0; i <= 16; i++) { const t = i / 16; pts.push([Math.max(0.02, r * Math.pow(Math.sin(t * Math.PI / 2), m.airliner || m.orbiter ? 0.55 : 0.8)), -Ln * t]); }
       pts.push([r, -h]);
       add(g, lathe(pts), mat('paint', m.orbiter ? 0xf2f2f2 : m.airliner ? 0xf4f4f4 : 0xb8bec4));
       if (m.orbiter) add(g, lathe(pts.slice(0, 6).map(([x, y]) => [x * 1.01 + 0.005, y])), mat('tile'));
       if (m.airliner || m.orbiter) {
-        for (let i = 0; i < 6; i++) { const a = (i - 2.5) * 0.22; add(g, new THREE.PlaneGeometry(r * 0.2, r * 0.16), mat('glass'), Math.sin(a) * r * 0.9, -Ln * 0.8, -Math.cos(a) * r * 0.9, -0.5, Math.PI - a, 0); }
+        for (let i = 0; i < 6; i++) { const a = (i - 2.5) * 0.22; add(g, new THREE.PlaneGeometry(r * 0.2, r * 0.16), mat('glass'), Math.sin(a) * r * 0.9, -Ln * 0.8, Math.cos(a) * r * 0.9, -0.5, a, 0); }
         if (m.airliner) for (let i = 0; i < 5; i++) for (const s of [-1, 1]) add(g, new THREE.CircleGeometry(0.12, 12), mat('glass'), s * r * 1.002, -Ln - 0.5 - i * 0.55, 0, 0, s * Math.PI / 2, 0);
       } else {
         const canopy = new THREE.SphereGeometry(1, 24, 16); canopy.scale(r * 0.52, h * 0.24, r * 0.55);
-        add(g, canopy, new THREE.MeshStandardMaterial({ color: 0x1a2a38, roughness: 0.05, metalness: 0.6, transparent: true, opacity: 0.85 }), 0, -Ln * 0.95, -r * 0.62);
+        add(g, canopy, new THREE.MeshStandardMaterial({ color: 0x1a2a38, roughness: 0.05, metalness: 0.6, transparent: true, opacity: 0.85 }), 0, -Ln * 0.95, r * 0.62);
       }
       g.userData.cockpit = true;
       break;

@@ -123,7 +123,7 @@ export class FlightScene {
       const H = dl.negate().applyQuaternion(s.q); H.addScaledVector(U, -H.dot(U)).normalize();
       const com = new THREE.Vector3(...v.com); const B = new THREE.Vector3();
       for (const c of v.contactPts) if (c.wheel) B.add(new THREE.Vector3(c.p[0] - com.x, 0, c.p[2] - com.z));
-      if (B.lengthSq() < 1e-6) B.set(0, 0, 1); B.normalize();
+      if (B.lengthSq() < 1e-6) B.set(0, 0, -1); B.normalize();
       let clr = 0; for (const c of v.contactPts) clr = Math.max(clr, (c.p[0] - com.x) * B.x + (c.p[1] - com.y) * B.y + (c.p[2] - com.z) * B.z);
       const Y = new THREE.Vector3(0, 1, 0), A = new THREE.Matrix4().makeBasis(Y.clone().cross(B), Y, B);
       const D = U.clone().negate(), W = new THREE.Matrix4().makeBasis(H.clone().cross(D), H, D);
@@ -281,6 +281,7 @@ export class FlightScene {
     const oldCom = v.com.slice();
     const lost = v.activateNextStage();
     if (wasPre) { v.clamped = false; v.landed = false; v.situation = 'flying'; if (v.throttle < 0.01) v.throttle = 1; this.touchThrottle.show(v.throttle); flash('Liftoff!'); }
+    else if (v.landed && v.wheels && v.throttle < 0.01 && v.livingParts().some(p => p.active && p.part.engine)) { v.throttle = 1; this.touchThrottle.show(1); } // rolling off from the runway
     if (lost.length) this.spawnDebris(lost, oldCom);
     this.applyDetach();
   }

@@ -41,19 +41,19 @@ export function defaultDesigns() {
   return [d('Bean-1 Hopper', hop), d('Falcon Dragon', f9), d('Saturn Moonshot', sv), d('Heavy Lift SLS', sls), d('Deep Ion Probe', ion), d('Daedalus Starship', ds), d('Warp Courier (sandbox)', wp), ...planeDesigns()];
 }
 
-// aircraft: the belly (gear side) is +Z, the canopy and fin on top (-Z)
+// aircraft: the belly (gear side) is -Z, the canopy and fin on top (+Z), so S / pull-back pitches the nose up
 export function planeDesigns() {
   const d = (name, root) => ({ name, root, builtin: true });
   const R = (id, at, sym, angle = 0) => ({ sym, at, angle, node: newNode(id) });
-  const jet = newNode('pod_cockpit'); jet.radial.push(R('gear_nose', 0.85, 1, -Math.PI / 2));
+  const jet = newNode('pod_cockpit'); jet.radial.push(R('gear_nose', 0.85, 1, Math.PI / 2));
   let c = jet; const add = (id) => { c.below = newNode(id); c = c.below; return c; };
-  add('tank_Fuselage_4').radial.push(R('wing_small', 0.9, 2), R('gear_main', GEAR_AT.jet, 1, -Math.PI / 2));
-  add('tank_Fuselage_2').radial.push(R('tailplane', 0.7, 2), R('tail_fin', 0.6, 1, Math.PI / 2)); add('eng_f404');
-  const sp = newNode('pod_orbiter'); sp.radial.push(R('gear_nose_l', 0.8, 1, -Math.PI / 2), R('chute_radial', 0.3, 2, Math.PI / 2));
-  c = sp; add('tank_HII_12').radial.push(R('wing_delta', 0.7, 2), R('gear_heavy', GEAR_AT.shuttle, 1, -Math.PI / 2), R('tail_orbiter', 0.75, 1, Math.PI / 2)); add('eng_sabre');
+  add('tank_Fuselage_4').radial.push(R('wing_small', 0.9, 2), R('gear_main', GEAR_AT.jet, 1, Math.PI / 2));
+  add('tank_Fuselage_2').radial.push(R('tailplane', 0.7, 2), R('tail_fin', 0.6, 1, -Math.PI / 2)); add('eng_f404');
+  const sp = newNode('pod_orbiter'); sp.radial.push(R('gear_nose_l', 0.8, 1, Math.PI / 2), R('chute_radial', 0.3, 1, -Math.PI / 2), R('canard', 0.8, 2));
+  c = sp; add('tank_HII_12').radial.push(R('wing_delta', 0.95, 2), R('gear_heavy', GEAR_AT.shuttle, 1, Math.PI / 2), R('tail_orbiter', 0.75, 1, -Math.PI / 2)); add('eng_sabre');
   return [d('Bean Jet', jet), d('Bean Shuttle (spaceplane)', sp)];
 }
-const GEAR_AT = { jet: 1.0, shuttle: 0.92 };
+const GEAR_AT = { jet: 1.0, shuttle: 1.0 };
 // saves from before a builtin design existed get it added (sandbox only: career designs are the player's)
 function upgrade(g) {
   if (g && g.mode !== 'career' && Array.isArray(g.designs)) for (const d of planeDesigns()) if (!g.designs.some(x => x.name === d.name)) g.designs.push(d);
