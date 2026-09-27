@@ -55,7 +55,13 @@ export function planeDesigns() {
 }
 const GEAR_AT = { jet: 1.0, shuttle: 1.0 };
 // saves from before a builtin design existed get it added (sandbox only: career designs are the player's)
-function upgrade(g) {
+// vessels whose saved state went non-finite (NaN, saved as null) are unrecoverable and would poison every flight
+// near them: drop them and send their crew home
+export function sanitizeVessels(g) {
+  if (g && Array.isArray(g.vessels)) { const ok = (a) => !a || a.every(Number.isFinite); const bad = g.vessels.filter(v => !(ok(v.r) && ok(v.v) && ok(v.landedBF)) || (v.galactic && !ok(v.galactic.pos)));
+    if (bad.length) { g.vessels = g.vessels.filter(v => !bad.includes(v)); for (const v of bad) for (const n of v.crew || []) { const a = (g.roster || []).find(r => r.name === n); if (a) a.status = 'available'; } } }
+}
+function upgrade(g) { sanitizeVessels(g);
   if (g && g.mode !== 'career' && Array.isArray(g.designs)) for (const d of planeDesigns()) if (!g.designs.some(x => x.name === d.name)) g.designs.push(d);
   return g;
 }

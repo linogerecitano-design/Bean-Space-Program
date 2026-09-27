@@ -24,6 +24,7 @@ import { graphicsDialog } from '../ui/graphics.js';
 import { makeShapePlasma, makeFireball, Sparks } from '../render/vfx.js';
 import { ClothChute } from '../render/chuteCloth.js';
 import { beanier } from '../game/settings.js';
+import { sanitizeVessels } from '../game/save.js';
 import { LaunchFX, frostPatch } from '../render/volumetrics.js';
 import { blackbody } from '../render/glsl.js';
 
@@ -70,6 +71,9 @@ export class FlightScene {
       for (const n of crew) { const a = G.game.roster.find(r => r.name === n); if (a) a.status = 'flying'; }
       v.crew = crew;
       this.place(v, params.where || 'pad');
+      // clear the launch spot: anything still parked there (an earlier flight left on the runway or pad) is recovered
+      if (v.landedBF) { const near = G.game.vessels.filter(d => d.body === v.body.name && d.landedBF && Math.hypot(d.landedBF[0] - v.landedBF[0], d.landedBF[1] - v.landedBF[1], d.landedBF[2] - v.landedBF[2]) < 150 && d.launchId !== params.launchId);
+        if (near.length) { for (const d of near) for (const n of d.crew || []) { const a = G.game.roster.find(r => r.name === n); if (a) a.status = 'available'; } G.game.vessels = G.game.vessels.filter(d => !near.includes(d)); flash(`Recovered ${near.length} vessel${near.length > 1 ? 's' : ''} left at the launch site`, 4000); } }
       // reverting: drop whatever the previous attempt of this launch left behind (vessel or debris)
       if (params.launchId) G.game.vessels = G.game.vessels.filter(x => x.launchId !== params.launchId);
       params.launchId ||= 'L' + Date.now().toString(36);
@@ -83,6 +87,7 @@ export class FlightScene {
     }
     const v = this.vessel;
     this.buildMesh();
+    sanitizeVessels(G.game);
     this.loadOthers();
     if (G.sys.starId === 'sol') { this.siteLevel = G.game.mode === 'career' ? (G.game.facility || 0) : 1; this.center = siteModel(this.siteLevel); this.earth = G.sys.get('Earth'); this.site = siteFrame(this.earth); }
     this.cam.dist = Math.max(15, v.height * 1.8); this.cam.pitch = 0.15; this.cam.yaw = 2.6; this.cam.minDist = v.type === 'eva' ? 1.5 : 3; this.cam.maxDist = 1e13;
@@ -104,6 +109,7 @@ export class FlightScene {
   }
   persist() {
     const G = this.G, v = this.vessel; if (!v || !G.game) return;
+    if (![v.r.x, v.r.y, v.r.z, v.v.x, v.v.y, v.v.z].every(Number.isFinite)) return; // never save a broken (NaN) state
     const d = v.serialize(); d.starId = G.sys.starId; d.t = G.t;
     const i = G.game.vessels.findIndex(x => x.id === v.id); d.launchId = v.launchId || (i >= 0 ? G.game.vessels[i].launchId : undefined); if (i >= 0) G.game.vessels[i] = d; else G.game.vessels.push(d);
     for (const o of this.others || []) { const k = G.game.vessels.findIndex(x => x.id === o.v.id); if (k >= 0) { const od = o.v.serialize(); od.starId = G.sys.starId; od.t = G.t; od.launchId = G.game.vessels[k].launchId; od.dock = o.v.dock || null; G.game.vessels[k] = od; } }
@@ -403,7 +409,17 @@ export class FlightScene {
     if (!v.crew.length) return flash('No crew aboard');
     if (v.situation === 'flying' && v.v.clone().sub(v.body.surfaceVel(v.r)).len() > 5) return flash('Too fast for EVA');
     name = name && v.crew.includes(name) ? name : v.crew[0];
+    if (![v.r.x, v.r.y, v.r.z, v.v.x, v.v.y, v.v.z].every(Number.isFinite)) return flash("Can't EVA: this vessel's position is broken (revert or recover it)");
     const seat = this.seats(v).find(s => s.names.includes(name)) || this.seats(v)[0];
+    const crew0 = v.crew.slice(), vessels0 = G.game.vessels.slice();
+    try { this.evaOut(v, name, seat); }
+    catch (err) { // never lose a Bean: put everything back the way it was
+      console.error(err); v.crew = crew0; G.game.vessels = vessels0; this.vessel = v; G.game.activeVessel = v.id; this.buildMesh();
+      flash('EVA failed: ' + (err && err.message || err), 6000);
+    }
+  }
+  evaOut(v, name, seat) {
+    const G = this.G;
     v.crew = v.crew.filter(n => n !== name);
     this.persist();
     const e = new Vessel({ name, root: newNode('eva_bean') }, { type: 'eva', crew: [name] });
@@ -518,7 +534,7 @@ export class FlightScene {
       const ov = o.v; if (ov.type === 'eva' || ov.body !== v.body || (ov.dock && ov.dock.to === v.id)) continue;
       this.updateOther(o); // bring it to this instant (at orbital speed a frame-old position is ~250 m off)
       const reach = (v.height + v.maxR) + (ov.height + ov.maxR);
-      if (ov.r.dist(v.r) > reach) continue;
+      if (!(ov.r.dist(v.r) <= reach)) continue; // (a vessel with a broken, NaN position must never reach this one)
       A = A || this.partSpheres(v); const B = this.partSpheres(ov);
       // docking: two free ports face to face, close, slow
       const rel = v.v.clone().sub(ov.v);
@@ -815,7 +831,15 @@ export class FlightScene {
     for (let i = 0; i < n; i++) {
       G.t += h; ctx.t = G.t;
       if (v.type === 'eva') this.evaThrust(h);
+      const snap = [v.r.clone(), v.v.clone(), v.q.clone(), v.w.clone()];
       physicsStep(v, h, ctx);
+      // watchdog: a non-finite number would poison everything (black screen, NaN readouts) — put the last good
+      // state back, calm the vessel down and report where it came from
+      if (![v.r.x, v.r.y, v.r.z, v.v.x, v.v.y, v.v.z, v.q.x, v.q.w, v.w.x, v.w.y, v.w.z].every(Number.isFinite)) {
+        v.r.copy(snap[0]); v.v.copy(snap[1]); v.q.copy(snap[2]); v.w.set(0, 0, 0);
+        if (!this.nanReported) { this.nanReported = true; const msg = 'Physics glitch caught: ' + (v.nanWhere || 'rotation') + ' (dt ' + h.toFixed(3) + ')'; console.error(msg); flash(msg, 12000); }
+        v.nanWhere = null; break;
+      }
       if (v.crashPart) { this.crash(); return; }
       this.checkSOI();
       if (v.galactic) return;

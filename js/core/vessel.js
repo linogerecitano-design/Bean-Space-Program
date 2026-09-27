@@ -376,6 +376,8 @@ export function physicsStep(v, dt, ctx) {
   if (v.sas && v.hasControl) { const sI = sasInput(v, ctx); tIn.add(sI); aIn.addScaledVector(sI, 0.15); }
   tIn.clampScalar(-1, 1); aIn.clampScalar(-1, 1);
   if (thrust > 0) ax.addScaled(new V3(nose.x, nose.y, nose.z), thrust / mkg);
+  const bad = (x) => !Number.isFinite(x);
+  if (bad(thrust) || bad(tIn.x + tIn.y + tIn.z)) v.nanWhere ||= `thrust ${thrust} input ${tIn.toArray()} rho ${v.rho} as ${v.airspeed}`;
   // RCS translation
   if (v.rcs && (v.input.x || v.input.y || v.input.z)) {
     const rcsF = v.livingParts().reduce((s, p) => s + (p.part.rcs ? p.part.rcs.thrust * 1000 : 0), 0) + (v.type === 'eva' ? 60 : 0);
@@ -405,7 +407,8 @@ export function physicsStep(v, dt, ctx) {
       ax.addScaled(vn, -D / mkg);
       v.dragN = D;
       // wings and fins: lift, drag and control torque from each surface
-      if (v.wings.length) { const Fw = aeroSurfaces(v, airV, rho, aIn, dt); ax.addScaled(Fw, 1 / mkg); }
+      if (v.wings.length) { const Fw = aeroSurfaces(v, airV, rho, aIn, dt); ax.addScaled(Fw, 1 / mkg); if (bad(Fw.x + Fw.y + Fw.z) || bad(v.w.x + v.w.y + v.w.z)) v.nanWhere ||= `wings F ${Fw.x},${Fw.y} w ${v.w.toArray()} s ${s}`; }
+      if (bad(ax.x + ax.y + ax.z)) v.nanWhere ||= `aero D ${v.dragN} q ${q} area ${area} cd ${cd}`;
       // aerodynamic torque toward stable orientation (bodies without lifting surfaces)
       const stableAxis = v.hasFins > 0 || v.cd < 0.4 ? 1 : v.heatshield && v.height < 8 ? -1 : 0.25;
       const want = new THREE.Vector3(vn.x, vn.y, vn.z).multiplyScalar(stableAxis >= 0 ? 1 : -1);
@@ -497,6 +500,7 @@ export function physicsStep(v, dt, ctx) {
         T.add(new THREE.Vector3().crossVectors(lp, new THREE.Vector3(F.x, F.y, F.z)));
       }
     }
+    if (bad(Fn.x + Fn.y + Fn.z) || bad(T.x + T.y + T.z)) v.nanWhere ||= `ground Fn ${Fn.x} T ${T.x} pad ${v.padHeight} R0 ${R0} n ${nIn}/${nWheel}`;
     if (v.contact) {
       vel.addScaled(Fn, dt / mkg);
       applyTorqueWorld(v, T, dt);
