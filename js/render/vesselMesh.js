@@ -20,7 +20,7 @@ export function buildVesselMesh(placed, opts = {}) {
     m.userData = { ...tpl.userData, placed: pl };
     m.traverse(o => { if (o.isMesh) { o.userData.placed = pl; o.castShadow = true; o.receiveShadow = true; } });
     g.add(m); parts.push(m);
-    m.traverse(o => { if (o.name === 'wing' && pl.part.mesh?.deploy) m.userData.wing = o; });
+    m.traverse(o => { if (o.name === 'wing' && pl.part.mesh?.deploy) m.userData.wing = o; if (o.name === 'flap') m.userData.flap = o; if (o.name === 'gearLeg') m.userData.gearLeg = o; });
     if (opts.plumes && pl.part.engine) {
       const noz = tpl.userData.nozzles || [[0, 0, (pl.part.d || 1) * 0.4]];
       const kind = pl.part.engine.solid ? 'solid' : pl.part.engine.power ? 'ion' : pl.part.id.startsWith('isd_') ? 'fusion' : pl.part.engine.prop;

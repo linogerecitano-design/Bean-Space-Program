@@ -28,7 +28,7 @@ const COMMON = `#include <common>
 // ---------------------------------------------------------------- exhaust plume
 // Local frame: nozzle exit at the origin, flow along -y. The box is sized in metres each frame
 // (vacuum plumes balloon out, sea-level ones stay columnar with shock diamonds).
-const KIND = { ion: 1, solid: 2, hydrolox: 3, fusion: 4, methalox: 5, hypergolic: 6, monoprop: 7, dhe3: 4, pulse: 4, antimatter: 4, xenon: 1, argon: 1 };
+const KIND = { jetfuel: 5, ion: 1, solid: 2, hydrolox: 3, fusion: 4, methalox: 5, hypergolic: 6, monoprop: 7, dhe3: 4, pulse: 4, antimatter: 4, xenon: 1, argon: 1 };
 export function makePlume(nozzleR, color = [1.0, 0.62, 0.3], kind = 'chem') {
   const U = { uTime: { value: 0 }, uThrottle: { value: 0 }, uPressure: { value: 1 }, uColor: { value: new THREE.Vector3(...color) }, uKind: { value: KIND[kind] || 0 },
     uCamLocal: { value: new THREE.Vector3() }, uBMin: { value: new THREE.Vector3(-1, -1, -1) }, uBMax: { value: new THREE.Vector3(1, 0, 1) }, uSteps: { value: steps(0.7) }, uR0: { value: nozzleR } };

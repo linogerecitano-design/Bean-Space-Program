@@ -142,7 +142,7 @@ export const SITE_CLEAR = {
   segments: [],
 };
 const VAB_POS = [-1500, 900];
-const RUNWAY = { x: -3800, z: 1500, len: 3000, ang: 0.35 };
+export const RUNWAY = { x: -3800, z: 1500, len: 3000, ang: 0.35 }; // site-local centre, length (m), heading from south
 const ROADS = [[-1200, 1250, -1500, 1000, 10], [-1500, 1000, -2300, 400, 10], [-2300, 400, -2600, -700, 10], [-2300, 400, -3100, 300, 10], [-1900, -300, -2300, 400, 10],
   [-1200, 1250, -600, 600, 12], [-600, 600, -40, 180, 12], [-1900, -300, -3000, -1200, 10], [-600, 600, -1900, -300, 10]];
 for (const [x1, z1, x2, z2, w] of ROADS) SITE_CLEAR.segments.push([x1, z1, x2, z2, w / 2 + 12]);
@@ -325,6 +325,11 @@ export function buildStarterSite() {
   for (const [x, z] of [[-40, -30], [40, -30], [-40, 40]]) { cyl(S, 0.25, 0.35, 18, m.steelGrey, x, 9, z, 6); box(S, 2.4, 0.9, 0.5, m.floodHead, x, 18, z); HALOS.push([x, 18, z, 10, 1, 0.9, 0.7]); }
   for (let k = 0; k < 12; k++) { const a1 = k / 12 * Math.PI * 2, a2 = (k + 1) / 12 * Math.PI * 2, R = 62; if (k === 3) continue; const x1 = Math.cos(a1) * R, z1 = Math.sin(a1) * R, x2 = Math.cos(a2) * R, z2 = Math.sin(a2) * R;
     const L = Math.hypot(x2 - x1, z2 - z1); const f = new THREE.Mesh(new THREE.BoxGeometry(0.05, 2.4, L), m.fence); f.position.set((x1 + x2) / 2, 1.2, (z1 + z2) / 2); f.rotation.y = Math.atan2(x2 - x1, z2 - z1); S.add(f); cyl(S, 0.06, 0.06, 2.6, m.steelGrey, x1, 1.3, z1, 5); }
+  // mown grass airstrip where the big runway will one day be, with a windsock
+  { const strip = new THREE.Mesh(new THREE.BoxGeometry(40, 0.3, RUNWAY.len), new THREE.MeshStandardMaterial({ color: 0x7d8a52, roughness: 1 })); strip.position.set(RUNWAY.x, 0.12, RUNWAY.z); strip.rotation.y = RUNWAY.ang; S.add(strip);
+    const dx = Math.sin(RUNWAY.ang), dz = Math.cos(RUNWAY.ang);
+    for (let k = -14; k <= 14; k++) for (const sd of [-1, 1]) box(S, 1.2, 0.35, 3, m.white, RUNWAY.x + dx * k * 100 + dz * sd * 21, 0.2, RUNWAY.z + dz * k * 100 - dx * sd * 21, RUNWAY.ang);
+    cyl(S, 0.08, 0.1, 6, m.steelGrey, RUNWAY.x + dz * 40, 3, RUNWAY.z - dx * 40, 6); }
   // arched tin hangar (the "VAB")
   const hx = -170, hz = 120;
   const arch = new THREE.Mesh(new THREE.CylinderGeometry(16, 16, 44, 32, 1, true, 0, Math.PI), s.tin); arch.rotation.z = Math.PI / 2; arch.rotation.y = 0.2; arch.position.set(hx, 0, hz); S.add(arch);

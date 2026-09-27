@@ -160,9 +160,9 @@ export class Pipeline {
           float cs = A.stack > 3.5 ? (A.Rt - A.Rb) * 1.2 : 25000.0;
           vec3 g = q / cs; vec3 id = floor(g); vec3 f = fract(g) - 0.5;
           float h = hash31(id), h2 = hash31(id + 17.3);
-          if (h2 > (A.stack > 3.5 ? 0.3 : 0.45)) return vec3(0.0); // only some storm cells are active
-          float per = 1.2 + h * 3.5; float ph = fract(uClock / per + h * 7.1) * per; // seconds into this cell's cycle
-          float e = exp(-ph * 6.0) * (0.65 + 0.35 * sin(ph * 160.0)) + (h2 < 0.3 ? 0.9 * exp(-abs(ph - 0.22) * 18.0) : 0.0); // stroke + restrike
+          if (h2 > (A.stack > 3.5 ? 0.04 : 0.45)) return vec3(0.0); // only some storm cells are active (on a gas giant, a rare few)
+          float per = A.stack > 3.5 ? 6.0 + h * 14.0 : 1.2 + h * 3.5; float ph = fract(uClock / per + h * 7.1) * per; // seconds into this cell's cycle
+          float e = exp(-ph * 6.0) * (0.65 + 0.35 * sin(ph * 160.0)) + (h2 < (A.stack > 3.5 ? 0.012 : 0.3) ? 0.9 * exp(-abs(ph - 0.22) * 18.0) : 0.0); // stroke + restrike
           if (uDbg > 0.5) e = 1.0;
           vec3 cen = (vec3(hash31(id + 3.1), hash31(id + 5.7), hash31(id + 9.2)) - 0.5) * 0.6;
           vec3 df = f - cen; float sp = exp(-dot(df, df) * (A.stack > 3.5 ? 30.0 : 9.0)) * (1.0 - hf * 0.4); // fades to nothing before the cell edge
@@ -209,19 +209,25 @@ export class Pipeline {
             float lum = gg ? dot(gasBand(A, d, lod), vec3(0.3, 0.5, 0.2)) : 0.5 + 0.35 * (nz(d * A.Rb / (thick * 30.0), thick * 30.0).g - 0.5);
             float core = 0.0; vec3 dS = gg ? swirl(d, core) : d; gCore = core;      // the sea wraps around the big vortices
             vec3 qs = dS * A.Rb; vec3 gw = wind * 25.0; q = dS * r;
+            // the noise volume tiles: warp every lookup by a much larger field and turn each octave a different way,
+            // so no pattern visibly repeats across the deck
+            vec3 wq = (nz(qs / (thick * 23.0) + 0.13, thick * 23.0).rgb - 0.5) * thick * 9.0 + (nz(qs / (thick * 6.7) + 0.61, thick * 6.7).gbr - 0.5) * thick * 2.2;
+            const mat3 RA = mat3(0.00, 0.80, 0.60, -0.80, 0.36, -0.48, -0.60, -0.48, 0.64), RB = mat3(0.36, 0.48, -0.80, -0.80, 0.60, 0.00, 0.48, 0.64, 0.60);
+            vec3 qsw = qs + gw + wq;
             // local deck level (in deck heights): rolling swells, brighter zones higher, towers over storms
-            float swell = nz((qs + gw) / (thick * 3.5), thick * 3.5).r;
-            float sc = nz((qs + gw) / (thick * 2.6), thick * 2.6).b; float storm = smoothstep(0.52, 0.85, sc); storm = sqrt(storm) * storm; // convective towers: domed, a few hundred km across
+            float swell = nz(qsw / (thick * 11.0), thick * 11.0).r * 0.6 + nz(RA * qsw / (thick * 4.3), thick * 4.3).g * 0.4;
+            float sc = nz(RB * qsw / (thick * 7.5), thick * 7.5).b; float storm = smoothstep(0.52, 0.85, sc); storm = sqrt(storm) * storm; // convective towers: domed, a few hundred km across
             float arms = nz(qs / (thick * 25.0), thick * 25.0).r * 0.7 + nz(qs / (thick * 9.0), thick * 9.0).g * 0.3; // wound into spirals in a vortex
             gStorm = gg ? (0.3 + 0.7 * storm) * (1.0 - core) : 0.0;
             float base = 0.1 + 0.2 * swell + (lum - 0.5) * 0.2 + storm * 0.3 + core * (0.06 + 0.2 * smoothstep(0.35, 0.7, arms));
             // billows: a 3D noise volume thresholded against height, so the tops are rounded, overhanging cauliflower
             // heads rather than peaks (below the deck level it is solid, above it only the strongest lobes rise)
-            float n1 = nz((q + gw) / (thick * 0.55), thick * 0.55).r * 0.7 + nz((q + gw) / (thick * 1.4), thick * 1.4).g * 0.3;
-            float n2 = nz((q + gw * 1.3) / (thick * 0.18), thick * 0.18).g;
-            float n3 = nz((q + gw * 1.6) / (thick * 0.05), thick * 0.05).r;
+            vec3 qw = q + gw + wq;
+            float n1 = nz(RA * qw / (thick * 1.9), thick * 1.9).r * 0.6 + nz(qw / (thick * 4.7), thick * 4.7).g * 0.4;
+            float n2 = nz(RB * qw / (thick * 0.53), thick * 0.53).g;
+            float n3 = nz(RA * qw / (thick * 0.16), thick * 0.16).r;
             float fp = max(dCam * uPixAng, 1.0);                                   // pixel footprint: no detail finer than ~3 px
-            float k2 = smoothstep(1.5, 4.0, thick * 0.14 / fp), k3 = smoothstep(1.5, 4.0, thick * 0.05 / fp);
+            float k2 = smoothstep(1.5, 4.0, thick * 0.4 / fp), k3 = smoothstep(1.5, 4.0, thick * 0.13 / fp);
             if (gCoarse) { k2 = 0.0; k3 = 0.0; }
             float nb = n1 * 0.76 + mix(0.5, n2, k2) * 0.18 + mix(0.5, n3, k3) * 0.06;
             float top = base + 0.3 * (1.0 + storm);                                     // how far the heads can rise

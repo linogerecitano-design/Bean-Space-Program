@@ -175,8 +175,21 @@ export class Vessel {
     this.height = top - bottom; this.top = top; this.bottom = bottom; this.maxR = rmax;
     this.crewCap = crewCap;
     const L = Math.max(this.height, 0.5), Rr = Math.max(rmax, 0.3);
+    let span = 0; for (const p of this.livingParts()) if (p.part.wing && p.pl.radial) span = Math.max(span, Math.hypot(p.pl.pos[0], p.pl.pos[2]) + p.part.wing.span);
+    const Ri = Math.max(Rr, span * 0.55); // wings spread the mass out: planes roll and yaw more slowly than a rocket of the same body
     const mk = this.mass * 1000;
-    this.I = new THREE.Vector3(mk * (3 * Rr * Rr + L * L) / 12, mk * Rr * Rr / 2, mk * (3 * Rr * Rr + L * L) / 12);
+    this.I = new THREE.Vector3(mk * (3 * Ri * Ri + L * L) / 12, mk * Ri * Ri / 2, mk * (3 * Ri * Ri + L * L) / 12);
+    this.span = span;
+    // lifting surfaces (wings, fins, control surfaces, grid fins), in vessel coordinates
+    this.wings = [];
+    for (const p of this.livingParts()) {
+      const w = p.part.wing; if (!w || !p.pl.radial) continue;
+      const a = p.pl.ang, ca = Math.cos(a), sa = Math.sin(a), [x, y, z] = p.pl.pos;
+      const AR = 2 * w.span * w.span / w.area; // a half-wing on a fuselage acts like a full wing of twice the span
+      this.wings.push({ p, w, c: new THREE.Vector3(x + w.ac[0] * ca, y + w.ac[1], z - w.ac[0] * sa), n: new THREE.Vector3(sa, 0, ca), en: new THREE.Vector3(0, -1, 0),
+        cla: w.grid ? 2.5 : 2 * Math.PI * AR / (AR + 2), ki: 1 / (Math.PI * AR * 0.8) });
+    }
+    this.wheels = this.livingParts().some(p => p.part.gear);
     this.torque = 0; this.hasFins = 0; this.heatshield = false; this.chutes = 0; this.legs = false;
     for (const p of this.livingParts()) {
       this.torque += (p.part.torque || 0);
@@ -188,7 +201,7 @@ export class Vessel {
     this.contactPts = this.computeContacts();
     this.hasControl = this.livingParts().some(p => p.part.crew || p.part.probe) || this.type === 'eva';
     this.frontal = Math.PI * Rr * Rr;
-    this.cd = this.livingParts().some(p => p.part.fairing || (p.part.mesh?.t === 'nose')) ? 0.35 : this.heatshield && this.height < 6 ? 1.1 : 0.6;
+    this.cd = this.livingParts().some(p => p.part.fairing || p.part.mesh?.t === 'nose' || p.part.mesh?.t === 'cockpit') ? 0.35 : this.heatshield && this.height < 6 ? 1.1 : 0.6;
   }
   updateMass() { let m = 0; for (const p of this.parts) if (p.attached && !p.broken) m += p.part.mass + p.fuel; this.mass = Math.max(m, 0.001); }
   computeContacts() {
@@ -198,6 +211,13 @@ export class Vessel {
       // touchdown speed a part survives (m/s): capsules and probes are built for parachute landings
       const tol = p.part.legs ? p.part.legs : p.part.chute ? 40 : p.part.crew || p.part.heatshield || p.part.probe ? 12 : 8;
       if (p.pl.radial) {
+        const a = p.pl.ang, ca = Math.cos(a), sa = Math.sin(a); const at = (lx, ly, lz) => [x + lx * ca + lz * sa, y + ly, z - lx * sa + lz * ca];
+        if (p.part.gear) { // wheels at the end of the strut (none while the gear is up)
+          const g = p.part.gear; if (this.gearUp) continue;
+          for (const s of g.spread ? [-g.spread, g.spread] : [0]) pts.push({ p: at(g.len, 0, s), tol: g.tol, wheel: true, steer: !!g.steer, brake: !!g.brake, part: p });
+          continue;
+        }
+        if (p.part.wing && p.part.wing.span > 0.8) { const w = p.part.wing; pts.push({ p: at(w.span, w.root / 2 - w.sweep - w.tip / 2, 0), tol: 10, part: p }); pts.push({ p: at(w.span * 0.5, w.ac[1], 0), tol: 10, part: p }); continue; }
         if (p.part.legs) { const a = p.pl.ang; pts.push({ p: [x + Math.cos(a) * (0.5 + h * 0.35), y - h * (p.part.mesh?.f9 ? 1 : 0.95), z - Math.sin(a) * (0.5 + h * 0.35)], tol, leg: true, part: p }); }
         continue;
       }
@@ -261,6 +281,17 @@ export class Vessel {
       let thrust = (e.thrust + (e.thrustSL - e.thrust) * k) * 1000 * thr * (p.limit ?? 1);
       let isp = e.isp + (e.ispSL - e.isp) * k;
       if (e.power) thrust *= powerFrac;
+      if (e.air) { // jets need oxygen: thrust follows air density, and fades out toward the engine's top speed
+        const rho = this.body && this.body.atmo && this.body.breathable ? (this.rho || 0) : 0, M = (this.airspeed || 0) / 340;
+        const fM = (m) => Math.max(0, (1 + 0.45 * M) * (1 - Math.pow(M / (m * 1.25), 3)));
+        if (e.air.hybrid) { // SABRE: breathes air up to about Mach 5.4, then closes the intake and runs as a rocket
+          p.airMode = rho > 0.02 && M < e.air.mach;
+          if (p.airMode) { thrust = e.air.thrust * 1000 * thr * (p.limit ?? 1) * Math.pow(rho / 1.225, 0.6) * (1 + 0.25 * M); isp = e.air.isp; }
+        } else {
+          if (rho < 1e-4) { p.firing = 0; p.flameout = true; continue; }
+          thrust = e.thrust * 1000 * thr * (p.limit ?? 1) * Math.pow(rho / 1.225, 0.7) * fM(e.air.mach); isp = e.isp;
+        }
+      }
       if (e.ramjet) { const vs = ctx.speedVsStar || 0; thrust *= Math.min(1, Math.max(0, (vs - 0.001 * C_LIGHT) / (0.02 * C_LIGHT))); }
       if (thrust <= 0) { p.firing = 0; continue; }
       const flow = e.prop ? thrust / (isp * G0) / 1000 : 0; // tonnes/s
@@ -308,14 +339,14 @@ export class Vessel {
     return { id: this.id, name: this.name, type: this.type, design: this.design, stage: this.stage, crew: this.crew,
       parts: this.parts.map(p => p.dockedWith != null ? [p.attached ? 1 : 0, +p.fuel.toFixed(4), p.active ? 1 : 0, p.deployed ? 1 : 0, +(p.limit ?? 1).toFixed(3), p.dockedWith] : [p.attached ? 1 : 0, +p.fuel.toFixed(4), p.active ? 1 : 0, p.deployed ? 1 : 0, +(p.limit ?? 1).toFixed(3)]),
       body: this.body?.name, r: this.r.toArray(), v: this.v.toArray(), q: this.q.toArray(), landed: this.landed, landedBF: this.landedBF, landedQ: this.landedQ,
-      situation: this.situation, throttle: this.throttle, sas: this.sas, sasMode: this.sasMode, galactic: this.galactic || null, suited: this.suited, grab: this.grab || null, dock: this.dock || null };
+      situation: this.situation, throttle: this.throttle, gearUp: this.gearUp || undefined, brakes: this.brakes || undefined, sas: this.sas, sasMode: this.sasMode, galactic: this.galactic || null, suited: this.suited, grab: this.grab || null, dock: this.dock || null };
   }
   static deserialize(d, sys) {
     const v = new Vessel(d.design, { id: d.id, type: d.type, crew: d.crew });
     v.stage = d.stage; d.parts.forEach((a, i) => { const p = v.parts[i]; if (!p) return; p.attached = !!a[0]; p.fuel = a[1]; p.active = !!a[2]; p.deployed = !!a[3]; if (a[4] !== undefined) p.limit = a[4]; if (a[5] != null) p.dockedWith = a[5]; });
     v.recalc(); v.body = sys ? sys.get(d.body) : null; v.r = V3.from(d.r); v.v = V3.from(d.v); v.q.fromArray(d.q);
     v.landed = d.landed; v.landedBF = d.landedBF; v.landedQ = d.landedQ; v.situation = d.situation; v.throttle = 0; v.sas = d.sas; v.sasMode = d.sasMode || 'stability';
-    v.galactic = d.galactic; v.suited = d.suited; v.grab = d.grab || null;
+    v.galactic = d.galactic; v.suited = d.suited; v.grab = d.grab || null; v.brakes = !!d.brakes; if (d.gearUp) { v.gearUp = true; v.contactPts = v.computeContacts(); }
     return v;
   }
 }
@@ -338,6 +369,10 @@ export function physicsStep(v, dt, ctx) {
   const thrust = v.engineState(dt, ctx);
   if (thrust > 0) v.updateMass();
   const nose = vesselUp(v, _v);
+  // control command (local axes: pitch about X, roll about Y, yaw about Z) from the pilot and SAS
+  const tIn = new THREE.Vector3(v.input.pitch, v.input.roll, v.input.yaw);
+  if (v.sas && v.hasControl) tIn.add(sasInput(v, ctx));
+  tIn.clampScalar(-1, 1);
   if (thrust > 0) ax.addScaled(new V3(nose.x, nose.y, nose.z), thrust / mkg);
   // RCS translation
   if (v.rcs && (v.input.x || v.input.y || v.input.z)) {
@@ -367,21 +402,24 @@ export function physicsStep(v, dt, ctx) {
       const D = q * cd * area;
       ax.addScaled(vn, -D / mkg);
       v.dragN = D;
-      // aerodynamic torque toward stable orientation
+      // wings and fins: lift, drag and control torque from each surface
+      if (v.wings.length) { const Fw = aeroSurfaces(v, airV, rho, tIn, dt); ax.addScaled(Fw, 1 / mkg); }
+      // aerodynamic torque toward stable orientation (bodies without lifting surfaces)
       const stableAxis = v.hasFins > 0 || v.cd < 0.4 ? 1 : v.heatshield && v.height < 8 ? -1 : 0.25;
       const want = new THREE.Vector3(vn.x, vn.y, vn.z).multiplyScalar(stableAxis >= 0 ? 1 : -1);
       const axis = _v2.crossVectors(nose, want);
-      const k = q * v.frontal * Math.max(v.height, 1) * 0.04 * (v.hasFins ? 2 + v.hasFins * 0.3 : Math.abs(stableAxis));
+      const k = v.wings.length ? 0 : q * v.frontal * Math.max(v.height, 1) * 0.04 * (v.hasFins ? 2 + v.hasFins * 0.3 : Math.abs(stableAxis));
       const tq = axis.multiplyScalar(k);
       applyTorqueWorld(v, tq, dt);
       // aero damping
-      v.w.multiplyScalar(Math.max(0, 1 - Math.min(0.5, q * 1e-6 * dt * 60)));
+      v.w.multiplyScalar(Math.max(0, 1 - Math.min(0.5, q * (v.wings.length ? 2e-7 : 1e-6) * dt * 60)));
     }
+    v.airspeed = s;
     // reentry heating (visual + damage)
     const flux = 1.7e-4 * Math.sqrt(rho / Math.max(B.radius * 1e-7, 1)) * Math.pow(airV.len(), 3) * 1e-3;
     v.heat = flux;
     if (!v.heatshield && flux > 900 && airV.len() > 2500) v.overheat = (v.overheat || 0) + dt; else v.overheat = Math.max(0, (v.overheat || 0) - dt);
-  } else { v.heat = 0; v.dragN = 0; }
+  } else { v.heat = 0; v.dragN = 0; v.airspeed = 0; for (const s of v.wings) s.p.defl = 0; }
   v.q_dyn = q; v.rho = rho;
   // sails (solar / laser)
   if (ctx.starDir && v.livingParts().some(p => p.part.sail)) {
@@ -411,7 +449,7 @@ export function physicsStep(v, dt, ctx) {
     const comLocal = new THREE.Vector3(...v.com);
     // the ground's stiffness is shared between the points touching it: summed per point, a capsule resting on
     // 16 points was so stiff the 20 ms step went unstable and it bounced and spun forever
-    let nIn = 0;
+    let nIn = 0, nWheel = 0;
     for (const c of v.contactPts) { const lp = _v2.set(c.p[0] - comLocal.x, c.p[1] - comLocal.y, c.p[2] - comLocal.z).applyQuaternion(v.q);
       const px = r.x + lp.x, py = r.y + lp.y, pz = r.z + lp.z; if (R0 + (v.padHeight || 0) - Math.sqrt(px * px + py * py + pz * pz) > 0) nIn++; }
     const kP = kSpring / Math.max(1, nIn * 0.5), cP = cDamp / Math.max(1, nIn * 0.5);
@@ -435,10 +473,24 @@ export function physicsStep(v, dt, ctx) {
         if (vhit > c.tol * (v.type === 'eva' ? 2 : 1) * (water ? 2.2 : 1) && !v.clamped && !ctx.noCrash) { c.part.broken = true; v.crashPart = c.part; }
         let fn = kP * pen - cP * vn; if (fn < 0) fn = 0;
         const vt = pv.clone().addScaled(n, -vn); const vtl = vt.len();
-        const fr = vtl > 1e-4 ? Math.min(fn * 0.8, mkg * vtl / dt * 0.25 / Math.max(1, nIn)) : 0;
-        const F = n.clone().scale(fn); if (vtl > 1e-4) F.addScaled(vt, -fr / vtl);
+        const F = n.clone().scale(fn);
+        if (c.wheel) { // rolls freely along its heading (steered by yaw input), grips sideways; brakes grab
+          nWheel++;
+          const hd = new THREE.Vector3(0, 1, 0); if (c.steer) hd.set(-Math.sin(v.input.yaw * 0.35), Math.cos(v.input.yaw * 0.35), 0);
+          hd.applyQuaternion(v.q); const hdn = hd.x * n.x + hd.y * n.y + hd.z * n.z;
+          const f = new V3(hd.x - n.x * hdn, hd.y - n.y * hdn, hd.z - n.z * hdn); const fl = f.len();
+          if (fl > 1e-3) {
+            f.scale(1 / fl); const vf = vt.dot(f); const lat = vt.clone().addScaled(f, -vf); const ll = lat.len();
+            const cap = mkg / dt * 0.25 / Math.max(1, nIn);
+            if (ll > 1e-4) F.addScaled(lat, -Math.min(fn * 0.9, cap * ll) / ll);
+            const roll = Math.min(fn * (c.brake && v.brakes ? 0.6 : 0.015), cap * Math.abs(vf)); F.addScaled(f, -Math.sign(vf) * roll);
+          }
+        } else {
+          const fr = vtl > 1e-4 ? Math.min(fn * 0.8, mkg * vtl / dt * 0.25 / Math.max(1, nIn)) : 0;
+          if (vtl > 1e-4) F.addScaled(vt, -fr / vtl);
+        }
         // scraping along hard ground throws sparks (the flight scene reads and clears this list)
-        if (!water && vtl > 3.5 && fn > 0) { v.scrapes ||= []; if (v.scrapes.length < 24) v.scrapes.push({ p: [px, py, pz], vt: [vt.x / vtl, vt.y / vtl, vt.z / vtl], s: vtl, n: [n.x, n.y, n.z], k: Math.min(1, fn / (mkg * 9.8)) }); }
+        if (!water && !c.wheel && vtl > 3.5 && fn > 0) { v.scrapes ||= []; if (v.scrapes.length < 24) v.scrapes.push({ p: [px, py, pz], vt: [vt.x / vtl, vt.y / vtl, vt.z / vtl], s: vtl, n: [n.x, n.y, n.z], k: Math.min(1, fn / (mkg * 9.8)) }); }
         Fn.add(F);
         T.add(new THREE.Vector3().crossVectors(lp, new THREE.Vector3(F.x, F.y, F.z)));
       }
@@ -446,7 +498,7 @@ export function physicsStep(v, dt, ctx) {
     if (v.contact) {
       vel.addScaled(Fn, dt / mkg);
       applyTorqueWorld(v, T, dt);
-      v.w.multiplyScalar(Math.exp(-dt * (water ? 1.5 : 4))); // rolling resistance / water drag on the hull
+      v.w.multiplyScalar(Math.exp(-dt * (water ? 1.5 : nWheel && nWheel === nIn ? 0.8 : 4))); // rolling resistance / water drag on the hull (wheels roll)
       if (water) { vel.x = surfV.x + (vel.x - surfV.x) * Math.exp(-dt * 0.8); vel.y = surfV.y + (vel.y - surfV.y) * Math.exp(-dt * 0.8); vel.z = surfV.z + (vel.z - surfV.z) * Math.exp(-dt * 0.8); }
       v.lastImpact = impact;
     }
@@ -454,15 +506,60 @@ export function physicsStep(v, dt, ctx) {
   }
   // --- rotation
   const Iw = v.I;
-  let tIn = new THREE.Vector3(v.input.pitch, v.input.roll, v.input.yaw); // local axes: pitch about X, roll about Y, yaw about Z
   const ctrlT = v.hasControl ? (v.torque * 1000 + gimbalTorque(v)) : 0;
-  if (v.sas && v.hasControl) tIn.add(sasInput(v, ctx));
-  tIn.clampScalar(-1, 1);
   const tau = tIn.multiplyScalar(ctrlT);
   v.w.x += tau.x / Iw.x * dt; v.w.y += tau.y / Iw.y * dt; v.w.z += tau.z / Iw.z * dt;
   const wl = v.w.length();
   if (wl > 1e-9) { _q.setFromAxisAngle(_v2.copy(v.w).divideScalar(wl), wl * dt); v.q.multiply(_q).normalize(); }
   if (v.w.length() > 6) v.w.setLength(6);
+}
+// Flat-plate aerodynamics of one surface: adds k × the force coefficient vector (local axes) for a plate with normal n
+// moving through the air at local velocity u (speed sp). Attached flow gives lift across the flow plus induced drag;
+// past the stall (~17°, later for grid fins) it becomes a plain normal force.
+function plate(s, n, u, sp, k, out) {
+  const sa = Math.max(-1, Math.min(1, (u.x * n.x + u.y * n.y + u.z * n.z) / sp)), ca = Math.sqrt(1 - sa * sa);
+  const al = Math.asin(sa), w = Math.exp(-Math.pow(al / (s.w.grid ? 0.5 : 0.3), 4));
+  const CL = s.cla * sa * ca, CDi = CL * CL * s.ki * w, cd0 = s.w.grid ? 0.5 : 0.012;
+  const ux = u.x / sp, uy = u.y / sp, uz = u.z / sp;
+  const li = ca > 1e-3 ? 1 / ca : 0; // lift direction: the normal with the along-flow part removed
+  const lx = (n.x - ux * sa) * li, ly = (n.y - uy * sa) * li, lz = (n.z - uz * sa) * li;
+  const d = CDi + cd0, cn = (1 - w) * 1.2 * sa;
+  out.x += k * (-w * CL * lx - d * ux - cn * n.x); out.y += k * (-w * CL * ly - d * uy - cn * n.y); out.z += k * (-w * CL * lz - d * uz - cn * n.z);
+}
+const _f = new THREE.Vector3(), _t = new THREE.Vector3(), _n2 = new THREE.Vector3(), _u = new THREE.Vector3(), _r = new THREE.Vector3(), _va = new THREE.Vector3();
+// Wings, fins and control surfaces. Returns the world-frame force (N) and applies the torque. Each movable surface
+// swings whichever way turns the craft the way the pilot (or SAS) asks.
+function aeroSurfaces(v, airV, rho, cmd, dt) {
+  const qi = new THREE.Quaternion().copy(v.q).invert();
+  _va.set(airV.x, airV.y, airV.z).applyQuaternion(qi);
+  const com = new THREE.Vector3(v.com[0], v.com[1], v.com[2]);
+  const Fl = new THREE.Vector3(), T = new THREE.Vector3(); let K = 0, C = 0;
+  const cmdOn = v.hasControl && cmd.lengthSq() > 1e-6;
+  for (const s of v.wings) {
+    _r.copy(s.c).sub(com);
+    _u.crossVectors(v.w, _r).add(_va); const sp = _u.length();
+    if (sp < 0.5) { s.p.defl = 0; continue; }
+    const Q = 0.5 * rho * sp * sp * s.w.area, ctrl = s.w.ctrl || 0;
+    const force = (dfl, out) => { out.set(0, 0, 0); plate(s, s.n, _u, sp, 1 - ctrl, out); if (ctrl > 0) { _n2.copy(s.n).multiplyScalar(Math.cos(dfl)).addScaledVector(s.en, Math.sin(dfl)); plate(s, _n2, _u, sp, ctrl, out); } return out; };
+    let want = 0;
+    if (ctrl > 0 && cmdOn) {
+      const dmax = s.w.defl * Math.min(1, 6000 / (0.5 * rho * sp * sp + 1)); // fly-by-wire: smaller throws at high dynamic pressure
+      const t1 = _t.crossVectors(_r, force(dmax, _f)).clone(); const t2 = _t.crossVectors(_r, force(-dmax, _f));
+      t1.sub(t2); const tl = t1.length(); if (tl > 1e-9) want = Math.max(-1, Math.min(1, t1.dot(cmd) / tl * 1.5)) * dmax;
+    }
+    s.p.defl = (s.p.defl || 0) + (want - (s.p.defl || 0)) * Math.min(1, dt * 10);
+    force(s.p.defl, _f).multiplyScalar(Q);
+    Fl.add(_f); T.add(_t.crossVectors(_r, _f));
+    const rl = _r.length(); K += Q * s.cla * rl; C += Q * s.cla * rl * rl / sp;
+  }
+  // keep tiny craft in thick air from out-running the 20 ms step (the real motion would be a fast, damped wobble)
+  const Imin = Math.min(v.I.x, v.I.y, v.I.z), wn = Math.sqrt(K / Imin) * dt, cz = C / Imin * dt;
+  const lim = Math.min(1, wn > 0.7 ? 0.7 / wn : 1, cz > 0.8 ? 0.8 / cz : 1);
+  T.multiplyScalar(lim);
+  v.w.x += T.x / v.I.x * dt; v.w.y += T.y / v.I.y * dt; v.w.z += T.z / v.I.z * dt;
+  v.liftN = Fl.length();
+  Fl.applyQuaternion(v.q);
+  return new V3(Fl.x, Fl.y, Fl.z);
 }
 function gimbalTorque(v) {
   let t = 0; for (const p of v.livingParts()) if (p.firing && p.part.engine.gimbal) t += v.thrustN > 0 ? p.part.engine.thrust * 1000 * p.firing * Math.sin(p.part.engine.gimbal * Math.PI / 180) * Math.max(1, v.height * 0.45) : 0; return t;

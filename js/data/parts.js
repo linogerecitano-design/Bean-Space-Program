@@ -14,13 +14,14 @@ export const PROPS = {
   pulse: { name: 'Nuclear pulse units', density: 1500, dry: 0.05, color: 0x888888 },
   antimatter: { name: 'Antihydrogen (Penning trap)', density: 70, dry: 3.0, color: 0x8844ff },
   water: { name: 'Water (salt solution)', density: 1100, dry: 0.08, color: 0x6688aa },
+  jetfuel: { name: 'Jet-A kerosene', density: 800, dry: 0.1, color: 0xe8e8e8 },
 };
 // Propellant consumed per engine type
-const ENGINE_PROP = { kerolox: 'kerolox', methalox: 'methalox', hydrolox: 'hydrolox', hypergolic: 'hypergolic', monoprop: 'monoprop', xenon: 'xenon', argon: 'argon', hydrogen: 'hydrogen', solid: 'solid', dhe3: 'dhe3', pulse: 'pulse', antimatter: 'antimatter', water: 'water' };
+const ENGINE_PROP = { jetfuel: 'jetfuel', kerolox: 'kerolox', methalox: 'methalox', hydrolox: 'hydrolox', hypergolic: 'hypergolic', monoprop: 'monoprop', xenon: 'xenon', argon: 'argon', hydrogen: 'hydrogen', solid: 'solid', dhe3: 'dhe3', pulse: 'pulse', antimatter: 'antimatter', water: 'water' };
 
 export const CATEGORIES = [
   ['pods', 'Command & Crew'], ['probes', 'Probe Cores'], ['tanks', 'Propellant Tanks'], ['engines', 'Engines'], ['boosters', 'Solid Boosters'],
-  ['advanced', 'Advanced Propulsion'], ['interstellar', 'Interstellar'], ['coupling', 'Decouplers & Adapters'], ['aero', 'Aerodynamics'],
+  ['advanced', 'Advanced Propulsion'], ['interstellar', 'Interstellar'], ['coupling', 'Decouplers & Adapters'], ['aero', 'Aerodynamics'], ['planes', 'Aircraft'],
   ['control', 'Control & RCS'], ['landing', 'Landing & Recovery'], ['power', 'Power & Thermal'], ['comms', 'Communication'],
   ['science', 'Science'], ['utility', 'Habitation & Utility'],
 ];
@@ -68,6 +69,8 @@ const TANK_SETS = [
   ['Small', 'Spacecraft propellant tank', 'hypergolic', 1.25, [0.8, 1.6], 0xd8d8d8],
   ['Service', 'Apollo SM / ESM-style bay', 'hypergolic', 3.9, [2, 4], 0xcfd2d6],
   ['Mini', 'Upper-stage kick tank', 'hypergolic', 0.625, [0.4, 0.8], 0xd8d8d8],
+  ['Fuselage', 'Aircraft fuselage fuel tank', 'jetfuel', 1.25, [2, 4], 0xeeeeee],
+  ['Wide Fuselage', 'Airliner fuselage fuel tank', 'jetfuel', 2.5, [4, 8], 0xeeeeee],
 ];
 for (const [pre, basis, prop, d, lens, color] of TANK_SETS) {
   for (const L of lens) {
@@ -211,10 +214,39 @@ for (const d of [0.625, 1.25, 2.5, 3.75, 5.4]) add({ id: `nose_${d}`, cat: 'aero
 add({ id: 'fairing_2', cat: 'aero', name: 'Payload Fairing 2.5m', basis: 'Delta II fairing', mass: 0.8, cost: 600, d: 0, d2: 2.5, h: 7, fairing: true, drag: -0.3, mesh: { t: 'fairing' } });
 add({ id: 'fairing_5', cat: 'aero', name: 'Payload Fairing 5.2m', basis: 'Falcon 9 fairing', mass: 1.9, cost: 1800, d: 0, d2: 5.2, h: 13.1, fairing: true, drag: -0.3, mesh: { t: 'fairing' } });
 add({ id: 'fairing_8', cat: 'aero', name: 'Payload Fairing 8.4m', basis: 'SLS Block 2 cargo fairing', mass: 6, cost: 4000, d: 0, d2: 8.4, h: 27, fairing: true, drag: -0.3, mesh: { t: 'fairing' } });
-add({ id: 'fin_delta', cat: 'aero', name: 'Delta Fin', basis: 'Sounding-rocket stabiliser fin', mass: 0.05, cost: 60, d: 0.1, h: 1.6, radial: true, fin: 1, mesh: { t: 'fin' } });
-add({ id: 'fin_large', cat: 'aero', name: 'Large Stabiliser Fin', basis: 'Saturn V S-IC fin', mass: 0.6, cost: 300, d: 0.3, h: 4.5, radial: true, fin: 4, mesh: { t: 'fin', big: true } });
-add({ id: 'fin_grid', cat: 'aero', name: 'Titanium Grid Fin', basis: 'Falcon 9 grid fin', mass: 0.1, cost: 400, d: 0.2, h: 1.5, radial: true, fin: 3, mesh: { t: 'gridfin' } });
+// Lifting surfaces share one planform description: span (outwards), root and tip chord, and how far the tip's
+// leading edge sits behind the root's. The root is centred on the attach point. ac = aerodynamic centre (quarter
+// chord of the mean chord), ctrl = movable fraction (ailerons, rudder; 1 = all-moving), defl = max deflection (rad).
+export function wingData(span, root, tip, sweep, o = {}) {
+  const xc = span * (root + 2 * tip) / (3 * (root + tip)), cx = root + (tip - root) * xc / span, le = root / 2 - sweep * xc / span;
+  return { span, root, tip, sweep, area: +(span * (root + tip) / 2).toFixed(2), ac: [+xc.toFixed(3), +(le - cx / 4).toFixed(3)], ctrl: 0, defl: 0.3, ...o };
+}
+add({ id: 'fin_delta', cat: 'aero', name: 'Delta Fin', basis: 'Sounding-rocket stabiliser fin', mass: 0.05, cost: 60, d: 0.1, h: 1.6, radial: true, fin: 1, wing: wingData(0.9, 1.6, 0.56, 0.8), mesh: { t: 'fin' } });
+add({ id: 'fin_large', cat: 'aero', name: 'Large Stabiliser Fin', basis: 'Saturn V S-IC fin', mass: 0.6, cost: 300, d: 0.3, h: 4.5, radial: true, fin: 4, wing: wingData(2.5, 4.5, 1.575, 2.25), mesh: { t: 'fin', big: true } });
+add({ id: 'fin_grid', cat: 'aero', name: 'Titanium Grid Fin', basis: 'Falcon 9 grid fin', mass: 0.1, cost: 400, d: 0.2, h: 0.4, radial: true, wing: { ...wingData(1.4, 1.2, 1.2, 0), grid: true, ctrl: 1, defl: 0.35, area: 1.44, ac: [0.8, 0] }, mesh: { t: 'gridfin' } });
 add({ id: 'fin_flap', cat: 'aero', name: 'Body Flap', basis: 'Starship forward/aft flap', mass: 1.5, cost: 1200, d: 0.3, h: 9, radial: true, fin: 8, mesh: { t: 'flap' } });
+
+// ---------------------------------------------------------------- Aircraft
+add({ id: 'pod_cockpit', cat: 'planes', name: 'Bean Jet Cockpit', basis: 'Single-seat fighter nose (F-16-style bubble canopy)', mass: 1.0, cost: 3000, d: 1.25, dTop: 0.15, h: 3.4, crew: 1, torque: 4, mesh: { t: 'cockpit' }, battery: 3 });
+add({ id: 'pod_cockpit_l', cat: 'planes', name: 'Airliner Flight Deck', basis: 'Boeing 737 nose section', mass: 3.2, cost: 9000, d: 2.5, dTop: 0.3, h: 5, crew: 4, torque: 10, mesh: { t: 'cockpit', airliner: true }, battery: 8 });
+add({ id: 'pod_orbiter', cat: 'planes', name: 'Orbiter Flight Deck', basis: 'Space Shuttle orbiter forward fuselage', mass: 7, cost: 30000, d: 5.2, dTop: 0.7, h: 8, crew: 5, torque: 30, heatTol: 30, monoprop: 0.4, mesh: { t: 'cockpit', orbiter: true }, battery: 25 });
+add({ id: 'wing_small', cat: 'planes', name: 'Swept Wing', basis: 'Learjet 45 wing (half-span)', mass: 0.3, cost: 500, d: 0.2, h: 2.2, radial: true, wing: wingData(4.5, 2.2, 1.0, 1.2, { ctrl: 0.22, defl: 0.35 }), mesh: { t: 'wing', color: 0xf2f2f2 } });
+add({ id: 'wing_large', cat: 'planes', name: 'Airliner Wing', basis: 'Boeing 737 wing (half-span)', mass: 2.6, cost: 3500, d: 0.4, h: 5.5, radial: true, wing: wingData(14, 5.5, 1.4, 5.5, { ctrl: 0.15, defl: 0.3 }), mesh: { t: 'wing', color: 0xe8ecf0 } });
+add({ id: 'wing_delta', cat: 'planes', name: 'Orbiter Delta Wing', basis: 'Space Shuttle orbiter wing (half-span), RCC leading edge', mass: 6.5, cost: 12000, d: 0.6, h: 18, radial: true, heatTol: 30, wing: wingData(10, 18, 2.5, 14, { ctrl: 0.18, defl: 0.35 }), mesh: { t: 'wing', color: 0x222222, tile: true } });
+add({ id: 'wing_delta_s', cat: 'planes', name: 'Small Delta Wing', basis: 'Dream Chaser-class lifting-body wing', mass: 0.6, cost: 2500, d: 0.3, h: 5, radial: true, heatTol: 20, wing: wingData(3, 5, 1, 3.6, { ctrl: 0.2, defl: 0.35 }), mesh: { t: 'wing', color: 0x222222, tile: true } });
+add({ id: 'canard', cat: 'planes', name: 'All-Moving Canard', basis: 'Eurofighter Typhoon foreplane', mass: 0.06, cost: 600, d: 0.1, h: 1.5, radial: true, wing: wingData(1.6, 1.5, 0.6, 1.0, { ctrl: 1, defl: 0.35 }), mesh: { t: 'wing', color: 0xd8d8d8 } });
+add({ id: 'tailplane', cat: 'planes', name: 'All-Moving Tailplane', basis: 'F-16 horizontal stabiliser', mass: 0.15, cost: 700, d: 0.15, h: 2.2, radial: true, wing: wingData(2.8, 2.2, 0.9, 1.4, { ctrl: 1, defl: 0.3 }), mesh: { t: 'wing', color: 0xe0e0e0 } });
+add({ id: 'tail_fin', cat: 'planes', name: 'Vertical Tail + Rudder', basis: 'Learjet 45 fin and rudder', mass: 0.15, cost: 600, d: 0.15, h: 3, radial: true, wing: wingData(2.8, 3, 1.3, 2.0, { ctrl: 0.35, defl: 0.45 }), mesh: { t: 'wing', color: 0xf2f2f2, stripe: true } });
+add({ id: 'tail_orbiter', cat: 'planes', name: 'Orbiter Tail + Rudder', basis: 'Space Shuttle vertical stabiliser', mass: 1.5, cost: 5000, d: 0.3, h: 9, radial: true, heatTol: 25, wing: wingData(7, 9, 3.5, 6.5, { ctrl: 0.3, defl: 0.45 }), mesh: { t: 'wing', color: 0xeeeeee } });
+add({ id: 'gear_nose', cat: 'planes', name: 'Steerable Nose Gear', basis: 'Learjet nose landing gear', mass: 0.06, cost: 400, d: 0.3, h: 0.5, radial: true, gear: { len: 1.95, wheelR: 0.28, steer: true, spread: 0 , tol: 12 }, mesh: { t: 'gear' } });
+add({ id: 'gear_main', cat: 'planes', name: 'Main Landing Gear (pair)', basis: 'Learjet main landing gear', mass: 0.2, cost: 800, d: 0.4, h: 0.6, radial: true, gear: { len: 1.6, wheelR: 0.36, spread: 1.4, brake: true , tol: 12 }, mesh: { t: 'gear' } });
+add({ id: 'gear_heavy', cat: 'planes', name: 'Heavy Main Gear (pair)', basis: 'Space Shuttle main landing gear', mass: 1.3, cost: 3000, d: 0.8, h: 1.2, radial: true, heatTol: 20, gear: { len: 2.6, wheelR: 0.58, spread: 2.6, brake: true , tol: 14 }, mesh: { t: 'gear', heavy: true } });
+add({ id: 'gear_nose_l', cat: 'planes', name: 'Heavy Nose Gear', basis: 'Space Shuttle nose landing gear', mass: 0.5, cost: 1500, d: 0.6, h: 1, radial: true, heatTol: 20, gear: { len: 3.6, wheelR: 0.5, steer: true, spread: 0.3 , tol: 14 }, mesh: { t: 'gear', heavy: true } });
+// jets breathe air: thrust falls with density, and each has a top speed. isp here is per unit of fuel burned
+add({ id: 'eng_j85', cat: 'planes', name: 'Small Afterburning Turbojet', basis: 'GE J85-21 (F-5, T-38)', mass: 0.31, cost: 2500, d: 0.625, h: 2.7, engine: { prop: 'jetfuel', air: { mach: 1.9 }, thrust: 22, thrustSL: 22, isp: 1900, ispSL: 1900, gimbal: 0, throttleMin: 0.05 }, mesh: { t: 'jet' } });
+add({ id: 'eng_f404', cat: 'planes', name: 'Afterburning Turbofan', basis: 'GE F404 (F/A-18)', mass: 1.04, cost: 7000, d: 1.25, h: 4, engine: { prop: 'jetfuel', air: { mach: 2.2 }, thrust: 79, thrustSL: 79, isp: 1800, ispSL: 1800, gimbal: 0, throttleMin: 0.05 }, mesh: { t: 'jet' } });
+add({ id: 'eng_cfm56', cat: 'planes', name: 'High-Bypass Turbofan', basis: 'CFM56-7B (Boeing 737)', mass: 2.4, cost: 9000, d: 2.5, h: 3.5, engine: { prop: 'jetfuel', air: { mach: 0.95, bypass: true }, thrust: 120, thrustSL: 120, isp: 6000, ispSL: 6000, gimbal: 0, throttleMin: 0.05 }, mesh: { t: 'jet', fan: true } });
+add({ id: 'eng_sabre', cat: 'planes', name: 'Hybrid Air-Breathing Rocket', basis: 'Reaction Engines SABRE (Skylon concept)', mass: 7, cost: 60000, d: 2.5, h: 10, engine: { prop: 'hydrolox', air: { mach: 5.4, hybrid: true, thrust: 2000, isp: 3600 }, thrust: 2940, thrustSL: 2400, isp: 460, ispSL: 400, gimbal: 5, throttleMin: 0.1 }, mesh: { t: 'jet', sabre: true } });
 
 // ---------------------------------------------------------------- Control
 add({ id: 'rcs_quad', cat: 'control', name: 'Quad RCS Block', basis: 'Apollo SM RCS quad', mass: 0.03, cost: 250, d: 0.3, h: 0.4, radial: true, rcs: { thrust: 0.445, isp: 290 }, mesh: { t: 'rcs' } });

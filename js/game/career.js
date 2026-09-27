@@ -45,6 +45,10 @@ const T = [
   ['sails', 'Light Sails', 6, 4, 400, ['observatories'], '⛵', ['isd_solarsail', 'isd_solarsail_l', 'isd_lightsail', 'isd_magsail', 'sci_jwst']],
   ['nuclearPulse', 'Nuclear Pulse', 6, 2, 600, ['nuclear'], '💣', ['eng_nswr', 'tank_water', 'isd_orion', 'tank_pulse']],
   ['fusion', 'Fusion Drives', 7, 2, 1000, ['nuclearPulse', 'advElectric'], '☀️', ['reactor_fusion', 'isd_daedalus', 'isd_daedalus2', 'isd_firefly', 'tank_dhe3', 'tank_dhe3_s', 'isd_cryo', 'isd_shield', 'isd_radiator', 'ant_interstellar']],
+  ['aviation', 'Aviation', 1, 7, 6, ['start'], '🛩', ['pod_cockpit', 'wing_small', 'tailplane', 'tail_fin', 'canard', 'gear_nose', 'gear_main', 'eng_j85', 'tank_Fuselage_2', 'tank_Fuselage_4']],
+  ['jetAge', 'Jet Age', 2, 7, 22, ['aviation'], '✈️', ['eng_f404', 'eng_cfm56', 'wing_large', 'pod_cockpit_l', 'tank_WideFuselage_4', 'tank_WideFuselage_8']],
+  ['hypersonics', 'Hypersonics', 4, 7, 120, ['jetAge', 'aerodynamics'], '🌡', ['wing_delta_s', 'eng_sabre', 'gear_nose_l']],
+  ['spaceplanes', 'Spaceplanes', 5, 7, 220, ['hypersonics', 'cryogenics'], '🛫', ['pod_orbiter', 'wing_delta', 'tail_orbiter', 'gear_heavy']],
   ['interstellar', 'Interstellar', 8, 3, 1500, ['fusion', 'sails'], '🌌', ['isd_orion_big', 'isd_antimatter', 'tank_antimatter', 'isd_bussard', 'isd_ring', 'isd_warp']],
 ];
 export const TECH = T.map(([id, name, tier, row, cost, req, icon, parts]) => ({ id, name, tier, row, cost, req, icon, parts: parts.filter(p => PART[p]) }));
@@ -167,10 +171,16 @@ for (const [b, k] of Object.entries(BODY_MULT)) {
   if (b !== 'Sun') add('orbit_' + b, `Orbit ${b}`, `Enter a stable orbit around ${b}`, orb, (s) => s.orbited.includes(b), 'Exploration');
   if (!['Sun', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'].includes(b)) add('land_' + b, `Land on ${b}`, `Touch down on ${b}`, land, (s) => s.landedOn.includes(b), 'Exploration');
 }
+add('firstFlight', 'First flight', 'Take off in a winged aircraft', 10, (s) => s.wingAir > 0, 'Aviation');
+add('wingSupersonic', 'Supersonic jet', 'Break the sound barrier in a winged aircraft', 15, (s) => s.wingSpeed >= 343, 'Aviation');
+add('wingHigh', 'Edge of the sky', 'Climb 20 km in a winged aircraft', 15, (s) => s.wingAlt >= 20000, 'Aviation');
+add('wingLanding', 'Greaser', 'Fly a winged aircraft and land it on its wheels', 15, (s) => s.wingLanded, 'Aviation');
+add('spaceplane', 'Spaceplane', 'Fly a winged vessel above 70 km', 30, (s) => s.wingAlt >= 70000, 'Aviation');
+add('reusable', 'Fly it again', 'Take a winged vessel to space and land it on its wheels', 50, (s) => s.wingAlt >= 70000 && s.wingLanded, 'Aviation');
 export const ACHIEVEMENTS = A;
 
 // per-flight record (lives on the flight scene)
-export const newFlightRecord = () => ({ maxAlt: 0, maxVsAir: 0, maxHsAir: 0, maxOrbV: 0, maxHeat: 0, survivedHeat: false, orbited: [], soi: [], landedOn: [], launched: false, eva: false, chuteLanding: false, flightTime: 0, interstellar: false, home: false, docked: false });
+export const newFlightRecord = () => ({ maxAlt: 0, maxVsAir: 0, maxHsAir: 0, maxOrbV: 0, maxHeat: 0, survivedHeat: false, orbited: [], soi: [], landedOn: [], launched: false, eva: false, chuteLanding: false, flightTime: 0, interstellar: false, home: false, docked: false, wingAir: 0, wingSpeed: 0, wingAlt: 0, wingLanded: false });
 export function trackFlight(rec, v, dt) {
   if (!v) return;
   if (v.galactic) { rec.interstellar = true; return; }
@@ -191,6 +201,12 @@ export function trackFlight(rec, v, dt) {
     if (v.livingParts().some(p => p.part.chute && p.deployed)) rec.chuteLanding = true;
   }
   if (v.type === 'eva') rec.eva = true;
+  // aircraft: a vessel with real wings (not just fins)
+  if (rec.home && v.wings && v.wings.some(w => !w.w.grid && w.w.area >= 2 && w.w.ctrl < 1)) {
+    rec.wingAir ??= 0; rec.wingSpeed ??= 0; rec.wingAlt ??= 0;
+    if (!v.contact && !v.landed && rec.launched && alt - (B.surfaceHeightAt ? B.surfaceHeightAt(v.r, 0) : 0) > 5) { rec.wingAir += dt; rec.wingAlt = Math.max(rec.wingAlt, alt); if (B.atmo && alt < B.atmo.height) rec.wingSpeed = Math.max(rec.wingSpeed, surf.len()); }
+    if (rec.wingAir > 5 && (v.contact || v.landed) && surf.len() < 3 && v.wheels && !v.gearUp && v.livingParts().some(p => p.part.gear)) rec.wingLanded = true;
+  }
   if (!v.landed && rec.launched) { // stable orbit: periapsis above the atmosphere / surface
     const mu = B.mu, r = v.r.len(), vv = v.v.len2(); const E = vv / 2 - mu / r;
     if (E < 0) { const h = v.r.clone().cross(v.v).len(); const a = -mu / (2 * E); const e = Math.sqrt(Math.max(0, 1 + 2 * E * h * h / (mu * mu))); const pe = a * (1 - e) - B.radius;
@@ -213,6 +229,7 @@ export const GIVERS = [
   { id: 'general', name: 'General Rupert Bean-Rogers', role: 'Defence ministry', outfit: 'general', idle: 'salute', line: 'Punctual rockets win wars. And contracts.' },
   { id: 'farmer', name: 'Uncle Bean', role: 'Local farmer & investor', outfit: 'farmer', idle: 'wave', line: "Built this pad on my turnip field, I did." },
   { id: 'professor', name: 'Prof. Humphrey Beanwick', role: 'Royal Astronomer', outfit: 'professor', idle: 'point', line: "The heavens, my dear Bean — go and look!" },
+  { id: 'aviator', name: 'Capt. Amelia Beanhart', role: 'Air racer & test pilot', outfit: 'aviator', idle: 'salute', line: 'Wings first, rockets later — trust me!', planes: true },
   { id: 'chef', name: 'Chef Beanoît', role: 'Space-food entrepreneur', outfit: 'chef', idle: 'talk', line: 'Zero-g soufflé needs zero-g testing, non?' },
 ];
 export const GIVER_BY_ID = Object.fromEntries(GIVERS.map(g => [g.id, g]));
@@ -227,6 +244,7 @@ function progressTier(game) {
 const REACH = [['Moon', 3], ['Mars', 4], ['Venus', 4], ['Mercury', 5], ['Jupiter', 5], ['Saturn', 5]];
 export function makeContract(game, r) {
   const tier = progressTier(game), g = GIVERS[Math.floor(r() * GIVERS.length)];
+  if (g.planes) return planeContract(game, r, g, tier);
   const types = ['altitude', 'speed', 'science', 'recover'];
   if (tier >= 1) types.push('orbit'); if (tier >= 2) types.push('soi', 'orbit', 'science', 'dock'); if (tier >= 3) types.push('land', 'soi'); if (tier >= 4) types.push('land', 'orbit');
   const type = types[Math.floor(r() * types.length)];
@@ -248,6 +266,20 @@ export function makeContract(game, r) {
     const sit = sits[Math.floor(r() * sits.length)] || 'spaceLow';
     c = { type: 'science', kind, body: b, sit, title: `${EXPERIMENTS[kind].name}`, text: `Collect ${EXPERIMENTS[kind].name.toLowerCase()} data while ${sitText(sit, b)}.`, pay: 12000 + round(20000 * bodyMult({ name: b, sys: { real: true } }) * (sit === 'landed' ? 1.5 : 1), 500) };
   }
+  c.pay = round(c.pay, 500); c.advance = round(c.pay * 0.2, 500); c.tp = Math.max(1, Math.round(c.pay / 25000));
+  c.id = 'c' + Math.floor(r() * 1e9).toString(36); c.giver = g.id;
+  return c;
+}
+// the test pilot's jobs: fly winged aircraft, land them, and (later) take them to space and back
+function planeContract(game, r, g, tier) {
+  const a = game.achievements || {}; const types = ['wingAlt', 'wingSpeed', 'wingLand'];
+  if (a.wingSupersonic || a.wingHigh || tier >= 2) types.push('wingSpeed', 'wingAlt', 'spaceplane');
+  if (a.spaceplane) types.push('spaceplane');
+  const type = types[Math.floor(r() * types.length)]; let c;
+  if (type === 'wingAlt') { const k = [1, 3, 6, 10, 15, 20, 30][Math.min(6, Math.floor(r() * 3) + (a.firstFlight ? 2 : 0) + (a.wingSupersonic ? 2 : 0))]; c = { type, km: k, title: `Fly an aircraft to ${k} km`, text: `Climb to ${k} km in a winged aircraft (wings, not just fins).`, pay: 6000 + k * 1500 }; }
+  else if (type === 'wingSpeed') { const ms = [80, 150, 250, 340, 500, 800, 1200][Math.min(6, Math.floor(r() * 3) + (a.firstFlight ? 2 : 0) + (a.wingSupersonic ? 2 : 0))]; c = { type, ms, title: `Fly an aircraft at ${ms} m/s`, text: `Reach ${ms} m/s through Earth's air in a winged aircraft${ms >= 343 ? ' — that is supersonic!' : '.'}`, pay: 5000 + ms * 60 }; }
+  else if (type === 'wingLand') { const km = [0.5, 2, 5, 10][Math.min(3, Math.floor(r() * 2) + (a.firstFlight ? 1 : 0) + (a.wingHigh ? 1 : 0))]; c = { type, km, title: `Fly to ${km} km and land`, text: `Take off in a winged aircraft, climb to ${km} km, then land it on its wheels and recover it.`, pay: 12000 + km * 3000 }; }
+  else { c = { type: 'spaceplane', km: 70, crew: r() < 0.5, title: 'Reusable spaceplane', text: `Fly a winged vessel above 70 km, glide it home and land it on its wheels${''}. Recover it to be paid.`, pay: 350000 }; }
   c.pay = round(c.pay, 500); c.advance = round(c.pay * 0.2, 500); c.tp = Math.max(1, Math.round(c.pay / 25000));
   c.id = 'c' + Math.floor(r() * 1e9).toString(36); c.giver = g.id;
   return c;
@@ -281,6 +313,9 @@ export function checkContracts(game, rec, v, event) {
     else if (c.type === 'land') ok = rec.landedOn.includes(c.body);
     else if (c.type === 'science') ok = event && event.science && event.science.kind === c.kind && event.science.body === c.body && event.science.sit === c.sit;
     else if (c.type === 'dock') ok = !!rec.docked || !!(event && event.docked);
+    else if (c.type === 'wingAlt') ok = (rec.wingAlt || 0) >= c.km * 1000;
+    else if (c.type === 'wingSpeed') ok = (rec.wingSpeed || 0) >= c.ms;
+    else if (c.type === 'wingLand' || c.type === 'spaceplane') ok = event && event.recovered && (rec.wingAlt || 0) >= c.km * 1000 && rec.wingLanded;
     else if (c.type === 'recover') ok = event && event.recovered && rec.maxAlt >= c.km * 1000 && (!c.crew || event.crewed);
     if (ok) done.push(c);
   }

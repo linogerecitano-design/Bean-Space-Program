@@ -38,7 +38,26 @@ export function defaultDesigns() {
   ds.radial.push({ sym: 4, at: 0.3, node: newNode('isd_radiator') });
   // Warp courier (sandbox)
   const wp = newNode('pod_orion'); c = wp; add('reactor_fusion'); add('isd_warp'); add('tank_lh2_ntr_s'); add('eng_nerva'); add('dec_9'); add('tank_Starship_50'); add('eng_raptor33');
-  return [d('Bean-1 Hopper', hop), d('Falcon Dragon', f9), d('Saturn Moonshot', sv), d('Heavy Lift SLS', sls), d('Deep Ion Probe', ion), d('Daedalus Starship', ds), d('Warp Courier (sandbox)', wp)];
+  return [d('Bean-1 Hopper', hop), d('Falcon Dragon', f9), d('Saturn Moonshot', sv), d('Heavy Lift SLS', sls), d('Deep Ion Probe', ion), d('Daedalus Starship', ds), d('Warp Courier (sandbox)', wp), ...planeDesigns()];
+}
+
+// aircraft: the belly (gear side) is +Z, the canopy and fin on top (-Z)
+export function planeDesigns() {
+  const d = (name, root) => ({ name, root, builtin: true });
+  const R = (id, at, sym, angle = 0) => ({ sym, at, angle, node: newNode(id) });
+  const jet = newNode('pod_cockpit'); jet.radial.push(R('gear_nose', 0.85, 1, -Math.PI / 2));
+  let c = jet; const add = (id) => { c.below = newNode(id); c = c.below; return c; };
+  add('tank_Fuselage_4').radial.push(R('wing_small', 0.9, 2), R('gear_main', GEAR_AT.jet, 1, -Math.PI / 2));
+  add('tank_Fuselage_2').radial.push(R('tailplane', 0.7, 2), R('tail_fin', 0.6, 1, Math.PI / 2)); add('eng_f404');
+  const sp = newNode('pod_orbiter'); sp.radial.push(R('gear_nose_l', 0.8, 1, -Math.PI / 2), R('chute_radial', 0.3, 2, Math.PI / 2));
+  c = sp; add('tank_HII_12').radial.push(R('wing_delta', 0.7, 2), R('gear_heavy', GEAR_AT.shuttle, 1, -Math.PI / 2), R('tail_orbiter', 0.75, 1, Math.PI / 2)); add('eng_sabre');
+  return [d('Bean Jet', jet), d('Bean Shuttle (spaceplane)', sp)];
+}
+const GEAR_AT = { jet: 1.0, shuttle: 0.92 };
+// saves from before a builtin design existed get it added (sandbox only: career designs are the player's)
+function upgrade(g) {
+  if (g && g.mode !== 'career' && Array.isArray(g.designs)) for (const d of planeDesigns()) if (!g.designs.some(x => x.name === d.name)) g.designs.push(d);
+  return g;
 }
 
 function makeRoster() {
@@ -81,7 +100,7 @@ export function hireAstronaut(game) {
 
 // ---------------------------------------------------------------- persistence
 const serialize = (g) => JSON.stringify(g, (k, v) => v === Infinity ? '__inf' : v);
-const deserialize = (s) => JSON.parse(s, (k, v) => v === '__inf' ? Infinity : v);
+const deserialize = (s) => upgrade(JSON.parse(s, (k, v) => v === '__inf' ? Infinity : v));
 // Save slots: every game has its own id; an index lists them for the save selector.
 const INDEX = 'bsp.slots.v1', LAST_SLOT = 'bsp.lastSlot';
 const slotKey = (id) => 'bsp.save.v1.' + id;

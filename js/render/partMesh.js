@@ -158,7 +158,70 @@ export function buildPartMesh(p) {
     case 'radialdec': add(g, new THREE.BoxGeometry(0.4, h, 0.3), mat('dark', 0x444444), 0.2, 0, 0); add(g, new THREE.CylinderGeometry(0.06, 0.06, 0.9, 8).rotateZ(Math.PI / 2), mat('metal'), 0.45, h * 0.3, 0); break;
     case 'truss': { const n = 4; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2 + Math.PI / 4; add(g, cyl(0.05 * r, 0.05 * r, h, 6), mat('metal', 0xc8c8c8), Math.cos(a) * r * 0.7, 0, Math.sin(a) * r * 0.7); } for (let k = 0; k <= 4; k++) add(g, new THREE.TorusGeometry(r * 0.7, 0.04 * r, 4, 4).rotateX(Math.PI / 2).rotateY(Math.PI / 4), mat('metal', 0xc8c8c8), 0, -h * k / 4); break; }
     case 'fin': { const shape = new THREE.Shape(); const L = m.big ? 2.5 : 0.9; shape.moveTo(0, 0); shape.lineTo(L, -h * 0.5); shape.lineTo(L, -h * 0.85); shape.lineTo(0, -h); shape.closePath(); const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.06, bevelEnabled: false }); geo.translate(0, h / 2, -0.03); add(g, geo, mat('paint', m.big ? 0x222222 : 0xf0f0f0)); break; }
-    case 'gridfin': { const W = 1.2; add(g, new THREE.BoxGeometry(0.2, 0.2, 0.3), mat('dark'), 0.1, 0, 0); for (let i = 0; i <= 8; i++) { add(g, new THREE.BoxGeometry(0.02, W, 0.25), mat('metal', 0x6a6a6a), 0.2 + i * W / 8, 0, 0); add(g, new THREE.BoxGeometry(W, 0.02, 0.25), mat('metal', 0x6a6a6a), 0.2 + W / 2, -W / 2 + i * W / 8, 0); } break; }
+    case 'gridfin': { // a lattice box whose cells face the flow along the rocket; it swivels on its arm to steer
+      const W = 1.2, D = 0.25; const piv = new THREE.Group(); piv.name = 'flap'; piv.userData.axis = [1, 0, 0]; g.add(piv);
+      add(g, new THREE.BoxGeometry(0.22, 0.2, 0.3), mat('dark'), 0.11, 0, 0);
+      for (let i = 0; i <= 8; i++) { add(piv, new THREE.BoxGeometry(0.025, D, W), mat('metal', 0x5e6064), 0.2 + i * W / 8, 0, 0); add(piv, new THREE.BoxGeometry(W, D, 0.025), mat('metal', 0x5e6064), 0.2 + W / 2, 0, -W / 2 + i * W / 8); }
+      break;
+    }
+    case 'wing': { // planform in the XY plane (span along +X), a hinged control surface along the trailing edge
+      const w = p.wing, c = w.ctrl || 0, a = w.root / 2, T = Math.min(0.45, Math.max(0.05, w.root * 0.045));
+      const M = m.tile ? mat('tile') : mat('paint', m.color), M2 = m.tile ? mat('dark', 0x333333) : mat('paint', 0xc4c8cc);
+      const poly = (pts) => { const sh = new THREE.Shape(); sh.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) sh.lineTo(q[0], q[1]); sh.closePath(); const geo = new THREE.ExtrudeGeometry(sh, { depth: T, bevelEnabled: true, bevelThickness: T * 0.3, bevelSize: T * 0.3, bevelSegments: 2 }); geo.translate(0, 0, -T / 2); return geo; };
+      const LEr = [0, a], LEt = [w.span, a - w.sweep], TEt = [w.span, a - w.sweep - w.tip], TEr = [0, -a];
+      if (c >= 1) { // all-moving: the whole surface pivots about its aerodynamic centre
+        const piv = new THREE.Group(); piv.name = 'flap'; piv.userData.axis = [1, 0, 0]; piv.position.set(0, w.ac[1], 0); g.add(piv);
+        add(piv, poly([LEr, LEt, TEt, TEr]).translate(0, -w.ac[1], 0), M);
+      } else {
+        const hr = [0, a - w.root * (1 - c)], ht = [w.span, a - w.sweep - w.tip * (1 - c)];
+        add(g, poly([LEr, LEt, ht, hr]), M);
+        if (c > 0) {
+          const piv = new THREE.Group(); piv.name = 'flap'; piv.position.set(hr[0], hr[1], 0); g.add(piv);
+          piv.userData.axis = new THREE.Vector3(ht[0] - hr[0], ht[1] - hr[1], 0).normalize().toArray();
+          add(piv, poly([hr, ht, TEt, TEr]).translate(-hr[0], -hr[1], 0).scale(1, 1, 0.8), M2);
+        }
+      }
+      if (m.stripe) add(g, new THREE.BoxGeometry(w.span * 0.5, 0.25, T * 1.7), mat('paint', 0x1a4aa0), w.span * 0.45, a - w.sweep * 0.45 - w.root * 0.3, 0);
+      break;
+    }
+    case 'gear': { // strut out from the hull, wheels at the end; the whole leg folds back toward the tail when raised
+      const G = p.gear, L = G.len, wr = G.wheelR, sp = G.spread, sR = m.heavy ? 0.13 : 0.06;
+      const leg = new THREE.Group(); leg.name = 'gearLeg'; g.add(leg);
+      add(g, new THREE.BoxGeometry(0.3, sR * 5, sR * 5), mat('dark'), 0.1, 0, 0);
+      add(leg, cyl(sR, sR * 0.8, L - wr).rotateZ(Math.PI / 2), mat('metal', 0xc8c8c8));
+      add(leg, cyl(sR * 1.4, sR * 1.4, (L - wr) * 0.35).rotateZ(Math.PI / 2), mat('metal', 0x909090), (L - wr) * 0.1, 0, 0);
+      if (sp) add(leg, new THREE.BoxGeometry(sR * 1.6, sR * 1.6, sp * 2), mat('metal', 0xa0a0a0), L - wr, 0, 0);
+      for (const z of sp ? [-sp, sp] : [0]) {
+        add(leg, new THREE.CylinderGeometry(wr, wr, wr * 0.7, 24).rotateX(Math.PI / 2), mat('dark', 0x1a1a1a), L - wr, 0, z);
+        add(leg, new THREE.CylinderGeometry(wr * 0.55, wr * 0.55, wr * 0.72, 16).rotateX(Math.PI / 2), mat('metal', 0xd0d0d0), L - wr, 0, z);
+      }
+      break;
+    }
+    case 'cockpit': { // pointed nose with the canopy on the -Z side (the belly, where the gear goes, is +Z)
+      const Ln = h * (m.airliner ? 0.45 : m.orbiter ? 0.4 : 0.7), pts = [];
+      for (let i = 0; i <= 16; i++) { const t = i / 16; pts.push([Math.max(0.02, r * Math.pow(Math.sin(t * Math.PI / 2), m.airliner || m.orbiter ? 0.55 : 0.8)), -Ln * t]); }
+      pts.push([r, -h]);
+      add(g, lathe(pts), mat('paint', m.orbiter ? 0xf2f2f2 : m.airliner ? 0xf4f4f4 : 0xb8bec4));
+      if (m.orbiter) add(g, lathe(pts.slice(0, 6).map(([x, y]) => [x * 1.01 + 0.005, y])), mat('tile'));
+      if (m.airliner || m.orbiter) {
+        for (let i = 0; i < 6; i++) { const a = (i - 2.5) * 0.22; add(g, new THREE.PlaneGeometry(r * 0.2, r * 0.16), mat('glass'), Math.sin(a) * r * 0.9, -Ln * 0.8, -Math.cos(a) * r * 0.9, -0.5, Math.PI - a, 0); }
+        if (m.airliner) for (let i = 0; i < 5; i++) for (const s of [-1, 1]) add(g, new THREE.CircleGeometry(0.12, 12), mat('glass'), s * r * 1.002, -Ln - 0.5 - i * 0.55, 0, 0, s * Math.PI / 2, 0);
+      } else {
+        const canopy = new THREE.SphereGeometry(1, 24, 16); canopy.scale(r * 0.52, h * 0.24, r * 0.55);
+        add(g, canopy, new THREE.MeshStandardMaterial({ color: 0x1a2a38, roughness: 0.05, metalness: 0.6, transparent: true, opacity: 0.85 }), 0, -Ln * 0.95, -r * 0.62);
+      }
+      g.userData.cockpit = true;
+      break;
+    }
+    case 'jet': { // turbine casing and a convergent nozzle (the SABRE gets a rocket bell)
+      const nr = r * (m.fan ? 0.55 : m.sabre ? 0.8 : 0.72);
+      add(g, lathe([[r * 0.9, 0], [r, -h * 0.12], [r, -h * 0.7], [r * 0.82, -h * (m.sabre ? 0.6 : 0.86)]]), mat(m.sabre ? 'paint' : 'metal', m.sabre ? 0xe8e8e8 : 0x7c7f84));
+      for (let i = 1; i < 4; i++) add(g, cyl(r * 1.01 + 0.004, r * 1.01 + 0.004, 0.06, SEG, true), mat('dark'), 0, -h * i * 0.18);
+      if (m.sabre) add(g, bell(nr * 0.3, nr, h * 0.38, nr * 0.45, 0.2), mat('niobium'), 0, -h * 0.6);
+      else { add(g, cyl(r * 0.82, nr, h * 0.14, 32, true), mat('niobium'), 0, -h * 0.86); for (let i = 0; i < 12; i++) add(g, new THREE.BoxGeometry(nr * 0.3, h * 0.14, 0.02), mat('dark', 0x3a3a3a), Math.cos(i / 12 * Math.PI * 2) * nr * 1.05, -h * 0.93, Math.sin(i / 12 * Math.PI * 2) * nr * 1.05, 0, -i / 12 * Math.PI * 2 + Math.PI / 2); }
+      g.userData.nozzles = [[0, 0, nr * 0.9]];
+      break;
+    }
     case 'flap': add(g, new THREE.BoxGeometry(2.5, h, 0.25).translate(1.25, 0, 0), mat('tile')); break;
     case 'rcs': add(g, new THREE.BoxGeometry(0.2, 0.3, 0.3), mat('paint', 0xd0d0d0), 0.1, 0, 0); for (const [dx, dy, dz] of [[1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) add(g, new THREE.ConeGeometry(0.04, 0.1, 8).rotateZ(-Math.PI / 2 * dx + (dy < 0 ? Math.PI : 0)).rotateX(dz * Math.PI / 2), mat('dark'), 0.2 + dx * 0.05, dy * 0.15, dz * 0.15); break;
     case 'ring': add(g, cyl(r, r, h), mat(m.color === 0xdedede ? 'paint' : 'metal', m.color)); for (let i = 0; i < 8; i++) add(g, new THREE.BoxGeometry(r * 0.25, h * 0.6, 0.05), mat('dark'), Math.cos(i / 8 * Math.PI * 2) * r, -h / 2, Math.sin(i / 8 * Math.PI * 2) * r, 0, -i / 8 * Math.PI * 2); break;

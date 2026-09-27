@@ -301,6 +301,7 @@ const OUTFITS = {
   general: { jacket: 0x4b5320, shirt: 0x4b5320, legs: 0x3f461c, stripe: 0x9a2020, shoes: 0x0e0e0e, gloves: 0xf0f0ea, belt: 0x5a3a18, hat: 'cap', medals: [0xc02020, 0x2050c0, 0xe0c020], epaulettes: true, tache: 0x3a2a1a },
   farmer: { jacket: 0xb02a22, check: 0x6a1410, overalls: 0x3a5a9a, legs: 0x3a5a9a, shoes: 0x5a3a1a, gloves: 0x9a7040, hat: 'straw' },
   professor: { jacket: 0x7a5a3a, tweed: true, patches: 0x4a3420, shirt: 0xf0ece0, legs: 0x3e4a38, shoes: 0x3a2412, gloves: 0xc8a070, glasses: 0x8a6a2a, hat: 'mortar', bowtie: 0x2a5a2a, tache: 0xe8e8e0 },
+  aviator: { jacket: 0x6a4424, shirt: 0xf0e8d8, legs: 0x5a5040, shoes: 0x2a1a10, gloves: 0x4a3018, belt: 0x2a1a10, hat: 'cap', scarf: 0xf4f4f0, glasses: 0x303a40 },
   chef: { jacket: 0xfbfbf8, shirt: 0xfbfbf8, legs: 0x202020, check: 0xe8e8e8, shoes: 0x1a1a1a, gloves: 0xfbfbf8, hat: 'toque', scarf: 0xc0202a, buttons: 0x202020, tache: 0x1a1210, tacheCurl: true },
 };
 export const OUTFIT_NAMES = Object.keys(OUTFITS);

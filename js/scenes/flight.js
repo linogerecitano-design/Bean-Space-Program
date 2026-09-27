@@ -9,7 +9,7 @@ import { PROPS } from '../data/parts.js';
 import { buildVesselMesh } from '../render/vesselMesh.js';
 import { OrbitCam } from '../core/camera.js';
 import { siteFrame, localToSystem, bfToSystem, attachToBody } from './site.js';
-import { siteModel, PAD_HEIGHT, PAD_RADIUS } from '../render/spaceCenter.js';
+import { siteModel, PAD_HEIGHT, PAD_RADIUS, RUNWAY } from '../render/spaceCenter.js';
 import { keys, down, hit, buildTouchControls, touch } from '../core/input.js';
 import { Navball } from '../render/navball.js';
 import { MapView } from '../render/mapView.js';
@@ -30,7 +30,7 @@ import { blackbody } from '../render/glsl.js';
 const WARPS = [1, 2, 3, 4, 10, 50, 100, 1000, 10000, 100000, 1e6, 1e7, 1e8, 1e9, 1e10];
 const PHYS_MAX = 3; // index of the highest physics warp
 const STEP = 0.02;
-const _q = new THREE.Quaternion(), _v = new THREE.Vector3();
+const _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _ax = new THREE.Vector3();
 
 export class FlightScene {
   constructor(G) {
@@ -115,6 +115,23 @@ export class FlightScene {
       const earth = G.sys.get('Earth'); const s = siteFrame(earth);
       setLanded(earth, 28.6082, -80.6041, PAD_HEIGHT + 3 - 0.3 + (s.ground - earth.surface.height(...latLonToDir(28.6082, -80.6041))));
       v.clamped = true; v.situation = 'prelaunch';
+    } else if (where === 'runway') {
+      // lined up at the south-west end of the runway, belly (gear side) down
+      const earth = G.sys.get('Earth'); const s = siteFrame(earth);
+      const dl = new THREE.Vector3(Math.sin(RUNWAY.ang), 0, Math.cos(RUNWAY.ang)), P = new THREE.Vector3(RUNWAY.x, 0, RUNWAY.z).addScaledVector(dl, RUNWAY.len * 0.44);
+      const off = P.applyQuaternion(s.q); const bf = new THREE.Vector3(s.bf[0] + off.x, s.bf[1] + off.y, s.bf[2] + off.z); const U = bf.clone().normalize();
+      const H = dl.negate().applyQuaternion(s.q); H.addScaledVector(U, -H.dot(U)).normalize();
+      const com = new THREE.Vector3(...v.com); const B = new THREE.Vector3();
+      for (const c of v.contactPts) if (c.wheel) B.add(new THREE.Vector3(c.p[0] - com.x, 0, c.p[2] - com.z));
+      if (B.lengthSq() < 1e-6) B.set(0, 0, 1); B.normalize();
+      let clr = 0; for (const c of v.contactPts) clr = Math.max(clr, (c.p[0] - com.x) * B.x + (c.p[1] - com.y) * B.y + (c.p[2] - com.z) * B.z);
+      const Y = new THREE.Vector3(0, 1, 0), A = new THREE.Matrix4().makeBasis(Y.clone().cross(B), Y, B);
+      const D = U.clone().negate(), W = new THREE.Matrix4().makeBasis(H.clone().cross(D), H, D);
+      const q = new THREE.Quaternion().setFromRotationMatrix(W.multiply(A.transpose()));
+      const hgt = Math.max(0, earth.surface.height(U.x, U.y, U.z)) + clr + 0.25;
+      if (this.lfx) this.lfx.clear();
+      v.body = earth; v.landed = true; v.landedBF = U.toArray().map(x => x * (earth.radius + hgt)); v.landedQ = q.toArray(); this.syncLanded(v, G.t);
+      v.situation = 'prelaunch'; v.brakes = false;
     } else if (where === 'moon') { setLanded(G.sys.get('Moon'), 0.674, 23.473, 0.5); v.situation = 'landed'; }
     else if (where === 'mars') { setLanded(G.sys.get('Mars'), 18.44, 77.45, 0.5); v.situation = 'landed'; }
     else if (where === 'leo' || where === 'helio') {
@@ -228,7 +245,7 @@ export class FlightScene {
     const main = h('div.hud-btns', {},
       B('sas', 'SAS', () => { this.vessel.sas = !this.vessel.sas; this.vessel.sasHold = null; }), h('button.sas-toggle', { onclick: () => document.body.classList.toggle('show-sas') }, 'Modes'), B('rcs', 'RCS', () => this.vessel.rcs = !this.vessel.rcs),
       B('map', 'MAP', () => this.toggleMap()), B('cam', 'CAM', () => this.cycleCam()), B('eva', 'EVA', () => this.eva(), '.opt'), B('flag', 'Flag', () => this.plantFlag(), '.opt'),
-      B('node', 'Maneuver', () => this.nodePanel(), '.opt'), B('sci', '🔬 Science', () => this.sciencePanel()), B('panels', 'Panels', () => this.togglePanels(), '.opt'), B('warpd', 'Warp drive', () => this.toggleWarpDrive(), '.opt'), B('menu', '☰', () => this.pauseMenu()),
+      B('node', 'Maneuver', () => this.nodePanel(), '.opt'), B('sci', '🔬 Science', () => this.sciencePanel()), B('panels', 'Panels', () => this.togglePanels(), '.opt'), B('gear', 'Gear', () => this.toggleGear()), B('brakes', 'Brakes', () => { this.vessel.brakes = !this.vessel.brakes; }), B('warpd', 'Warp drive', () => this.toggleWarpDrive(), '.opt'), B('menu', '☰', () => this.pauseMenu()),
       B('more', '⋯', () => document.body.classList.toggle('hud-more')));
     const left = h('div.col', {}, sasModes); const right = h('div.col', {}, main);
     // on phones the telemetry collapses to the essentials; tap it for the full readout
@@ -283,6 +300,11 @@ export class FlightScene {
     const push = vesselUp(v).multiplyScalar(-1.2); deb.v.add(new V3(push.x, push.y, push.z));
     this.root.add(g); this.debris.push(deb);
     v.comPrev = v.com.slice();
+  }
+  toggleGear() {
+    const v = this.vessel; if (!v.wheels) return flash('No landing gear');
+    if (!v.gearUp && (v.contact || v.landed)) return flash("Can't raise the gear on the ground");
+    v.gearUp = !v.gearUp; v.contactPts = v.computeContacts(); flash(v.gearUp ? 'Gear up' : 'Gear down');
   }
   togglePanels() {
     const v = this.vessel; const ps = v.livingParts().filter(p => p.part.mesh?.deploy);
@@ -706,6 +728,8 @@ export class FlightScene {
     if (hit('KeyF')) this.eva();
     if (hit('KeyG')) { for (const p of v.livingParts()) if (p.part.chute) p.deployed = true; flash('Parachutes armed'); }
     if (hit('KeyP')) this.togglePanels();
+    if (hit('KeyL')) this.toggleGear();
+    if (hit('KeyB')) { v.brakes = !v.brakes; flash(v.brakes ? 'Brakes on' : 'Brakes off'); }
     if (hit('Period')) this.setWarp(this.warpI + 1);
     if (hit('Comma')) this.setWarp(this.warpI - 1);
     if (hit('Slash')) this.setWarp(0);
@@ -754,7 +778,7 @@ export class FlightScene {
       // stay locked until something pushes us off the ground
       v.engineState(0, this.ctx());
       const g = v.body.mu / v.r.len2();
-      const wantsLift = v.thrustN > v.mass * 1000 * g * 0.95 || (v.type === 'eva' && this.evaMove && (this.evaMove.jump || this.evaMove.fwd || this.evaMove.side)) || (v.type === 'eva' && this.evaMove && this.evaMove.up > 0);
+      const wantsLift = v.thrustN > v.mass * 1000 * g * 0.95 || (v.wheels && !v.gearUp && v.thrustN > 0 && !v.brakes) || (v.type === 'eva' && this.evaMove && (this.evaMove.jump || this.evaMove.fwd || this.evaMove.side)) || (v.type === 'eva' && this.evaMove && this.evaMove.up > 0);
       if (v.clamped || !wantsLift) {
         G.t += simDt;
         if (v.type === 'eva' && this.evaMove && (this.evaMove.fwd || this.evaMove.side)) { this.walk(simDt); }
@@ -839,6 +863,7 @@ export class FlightScene {
       if (shielded && p !== shield) expo *= 0.04;
       let cap = 2600 * (0.6 + Math.sqrt(Math.max(p.part.mass || 0.3, 0.05)));
       if (p.part.heatshield) cap *= 30;
+      if (p.part.heatTol) cap *= p.part.heatTol;
       // only re-entry-class heating does damage (ascent through max-Q peaks well below this); cools slowly
       const net = flux * expo - 700;
       p.heatH = Math.max(0, (p.heatH || 0) + (net > 0 ? net / cap : -0.04) * dt);
@@ -1090,6 +1115,12 @@ export class FlightScene {
     if (v.scrapes && v.scrapes.length) { const base = v.body.surfaceVel(v.r); for (const e of v.scrapes) this.sparks.emit(e.p, e.vt, e.s, e.n, base, e.k); v.scrapes.length = 0; }
     { const bp = v.body.posAt(G.t); const up = v.r.clone().norm(); const gg = v.body.mu / v.r.len2();
       this.sparks.update(Math.min(0.1, dt * fxWarp), { x: -up.x * gg, y: -up.y * gg, z: -up.z * gg }, { x: bp.x - camPos.x, y: bp.y - camPos.y, z: bp.z - camPos.z }, v.body.hasSurface ? v.body.radius + v.body.surfaceHeightAt(v.r, G.t) : 0); }
+    // control surfaces swing, landing gear folds
+    if (this.mesh.userData.parts) for (const m of this.mesh.userData.parts) {
+      const f = m.userData.flap, gl = m.userData.gearLeg, rt = m.userData.rt;
+      if (f) { const ax = f.userData.axis || [1, 0, 0]; f.quaternion.setFromAxisAngle(_ax.set(ax[0], ax[1], ax[2]), rt.defl || 0); }
+      if (gl) { const want = v.gearUp ? 1 : 0; gl.userData.k = (gl.userData.k ?? want) + (want - (gl.userData.k ?? want)) * Math.min(1, dt * 1.2); gl.rotation.z = -gl.userData.k * Math.PI * 0.47; }
+    }
     // deployable solar arrays fold/unfold (and retract automatically in thick air)
     if (this.mesh.userData.parts) for (const m of this.mesh.userData.parts) {
       const wing = m.userData.wing; if (!wing) continue; const rt = m.userData.rt;
@@ -1187,6 +1218,7 @@ export class FlightScene {
     this.btns.warpd.classList.toggle('on', v.warp.on); this.btns.warpd.style.display = v.livingParts().some(p => p.part.warp) ? '' : 'none';
     this.btns.flag.style.display = v.type === 'eva' ? '' : 'none';
     if (this.btns.sci) { const ex = this.experiments(); this.btns.sci.style.display = ex.length ? '' : 'none'; this.btns.sci.classList.toggle('on', ex.some(e => e.tp > 0)); }
+    { const gear = v.wheels; this.btns.gear.style.display = gear ? '' : 'none'; this.btns.gear.classList.toggle('on', gear && !v.gearUp); this.btns.brakes.style.display = gear ? '' : 'none'; this.btns.brakes.classList.toggle('on', !!v.brakes); }
     this.btns.panels.style.display = v.livingParts().some(p => p.part.mesh?.deploy) ? '' : 'none'; this.btns.panels.classList.toggle('on', v.livingParts().some(p => p.part.mesh?.deploy && p.deployed));
     if (v.galactic) {
       const g = v.galactic; const sp = Math.hypot(...g.vel);

@@ -63,15 +63,16 @@ export class SpaceCenterScene {
     const G = this.G; const game = G.game;
     const sel = h('select', {}, game.designs.map((d, i) => h('option', { value: i, selected: i === game.selectedDesign ? true : undefined }, d.name)));
     const career = isCareer(game);
-    const where = career ? h('select', {}, h('option', { value: 'pad' }, NAMES[this.level].pad + ' (Earth)'))
-      : h('select', {}, h('option', { value: 'pad' }, 'Launch Pad 39B (Earth)'), h('option', { value: 'leo' }, 'Low Earth Orbit, 400 km (sandbox)'), h('option', { value: 'moon' }, 'Lunar surface (sandbox)'), h('option', { value: 'mars' }, 'Mars surface (sandbox)'), h('option', { value: 'helio' }, 'Deep space near Earth (sandbox)'));
+    const where = career ? h('select', {}, h('option', { value: 'pad' }, NAMES[this.level].pad + ' (Earth)'), h('option', { value: 'runway' }, (this.level ? 'Runway' : 'Grass airstrip') + ' (planes)'))
+      : h('select', {}, h('option', { value: 'pad' }, 'Launch Pad 39B (Earth)'), h('option', { value: 'runway' }, 'Runway (planes)'), h('option', { value: 'leo' }, 'Low Earth Orbit, 400 km (sandbox)'), h('option', { value: 'moon' }, 'Lunar surface (sandbox)'), h('option', { value: 'mars' }, 'Mars surface (sandbox)'), h('option', { value: 'helio' }, 'Deep space near Earth (sandbox)'));
     const info = h('div.small.muted');
     const check = () => { // career: price and launch-site limits of the chosen design
       if (!career) return true; const c = launchCheck(game, game.designs[+sel.value]); const bad = c.problems;
       info.innerHTML = `Cost <b>${fmtFunds(c.cost)}</b> (you have ${fmtFunds(game.funds)}) · ${c.mass.toFixed(1)} t · ${c.parts} parts · ${c.height.toFixed(1)} m` + (bad.length ? `<br><span style="color:#f87171">Can't launch: ${bad.join('; ')}.</span>` : '');
       return !bad.length;
     };
-    sel.onchange = check; check();
+    const pickSite = () => { const d = game.designs[+sel.value]; let gear = false; const walkN = (n) => { if (!n || gear) return; if (/^gear_/.test(n.id)) gear = true; walkN(n.below); for (const r of n.radial || []) walkN(r.node); walkN(n.stack); }; walkN(d?.root); where.value = gear ? 'runway' : 'pad'; };
+    sel.onchange = () => { pickSite(); check(); }; pickSite(); check();
     const avail = game.roster.filter(a => a.status === 'available');
     const crew = h('select', { multiple: true, size: Math.min(5, Math.max(2, avail.length)) }, avail.map((a, i) => h('option', { value: a.name, selected: i === 0 ? true : undefined }, `${a.name} (${a.trait})`)));
     const r = await modal('Launch', h('div.col', {}, h('label', {}, 'Vessel'), sel, h('label', {}, 'Start location'), where, h('label', {}, 'Crew (seats permitting)'), crew, info), [{ label: 'Cancel' }, { label: 'Launch!', value: 'go', primary: true }]);

@@ -15,7 +15,7 @@ export class Bolts {
     this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     this.mesh = new THREE.Mesh(this.geo, this.mat); this.mesh.frustumCulled = false; this.mesh.renderOrder = 6; this.mesh.visible = false;
     scene.add(this.mesh);
-    this.bolts = []; this.wait = 0.5;
+    this.bolts = []; this.wait = rnd(3, 10);
     this.flash = { pos: new THREE.Vector3(), I: 0, R: 1 };
   }
   // one bolt: a trunk from low in the deck up past the tops, with a few forks; points in the body frame
@@ -52,8 +52,8 @@ export class Bolts {
     const w2b = g.b2w.clone().transpose();
     const sub = g.C.clone().negate().applyMatrix3(w2b).normalize(); // camera direction from the centre, body frame
     const fwdB = camFwd.clone().applyMatrix3(w2b);
-    // storms are busy: a bolt every second or so while the camera is near the deck
-    if (g.alt < g.thick * 12 && (this.wait -= dt) <= 0) { if (this.bolts.length < MAX_BOLTS) this.spawn(t, g, sub, fwdB); this.wait = rnd(0.25, 1.6); }
+    // a bolt now and then (every ten seconds or so) while the camera is near the deck
+    if (g.alt < g.thick * 12 && (this.wait -= dt) <= 0) { if (this.bolts.length < MAX_BOLTS) this.spawn(t, g, sub, fwdB); this.wait = rnd(5, 18); }
     this.bolts = this.bolts.filter(b => t < b.end);
     let nv = 0; const P = this.pos; const a = new THREE.Vector3(), b2 = new THREE.Vector3(), side = new THREE.Vector3(), seg = new THREE.Vector3(), mid = new THREE.Vector3();
     const toWorld = (p, out) => out.copy(p).applyMatrix3(g.b2w).add(g.C);
