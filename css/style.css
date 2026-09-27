@@ -53,6 +53,9 @@ h1, h2, h3 { margin: 0; }
 .ico-dwarf { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--c); background: radial-gradient(circle, var(--c) 30%, transparent 35%); }
 .ico-asteroid { width: 6px; height: 6px; background: var(--c); transform: rotate(45deg); opacity: .8; }
 .ico-comet { width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: -6px 0 5px -2px var(--c); }
+.ico-ves { width: 14px; height: 14px; background: #cbd5e1; clip-path: polygon(50% 0, 100% 100%, 50% 72%, 0 100%); filter: drop-shadow(0 0 2px #000); }
+.ico-ves.me { background: #34d399; }
+.marker .tgt { color: #f0abfc; font-weight: 700; }
 
 /* VAB */
 #vab-left { position: fixed; left: 8px; top: 64px; bottom: 8px; width: min(340px, 44vw); display: flex; flex-direction: column; overflow: hidden; }

@@ -293,7 +293,7 @@ export class LaunchFX {
     const nose = new THREE.Vector3(0, 1, 0).applyQuaternion(v.q);
     const exitRel = ctx.focusRel.clone().addScaledVector(nose, v.bottom - v.com[1]); // exhaust exit, camera-relative
     let thrust = 0, kind = 'kerolox', smokeK = 0;
-    for (const p of v.livingParts()) if (p.firing && p.part.engine) { const T = p.part.engine.thrust * 1000 * p.firing; thrust += T; const k = p.part.engine.solid ? 'solid' : p.part.engine.prop; const s = SMOKE_K[k] ?? 0.6; if (s * T > smokeK) { smokeK = s * T; kind = k; } }
+    for (const p of v.livingParts()) if (p.firing && p.part.engine && !(p.part.engine.air && (!p.part.engine.air.hybrid || p.airMode))) { const T = p.part.engine.thrust * 1000 * p.firing; thrust += T; const k = p.part.engine.solid ? 'solid' : p.part.engine.prop; const s = SMOKE_K[k] ?? 0.6; if (s * T > smokeK) { smokeK = s * T; kind = k; } }
     const firing = thrust > 0 && air > 0.02 && v.body.hasSurface;
     if (firing) {
       const r0 = Math.max(3, Math.min(45, Math.sqrt(thrust) / 280));
@@ -305,7 +305,8 @@ export class LaunchFX {
       const rl = exitBF.length(); const upBF = exitBF.clone().divideScalar(rl);
       const gh = v.body.surface ? v.body.surface.height(upBF.x, upBF.y, upBF.z) : 0;
       const hAbove = rl - v.body.radius - Math.max(gh, v.body.name === 'Earth' ? 0 : -1e9) - (v.padHeight || 0) * 0.6;
-      const ground = hAbove < r0 * 14;
+      // the billowing pad plume is for exhaust blasting down at the ground; a craft racing along a runway leaves a trail
+      const upW = new THREE.Vector3(upBF.x, upBF.y, upBF.z).applyQuaternion(qb); const ground = hAbove < r0 * 14 && nose.dot(upW) > 0.6;
       // emit by distance travelled (trail) or time (on the pad), whichever comes first
       const last = this.lastEmit; const moved = last ? exitBF.distanceTo(last.p) : Infinity; const since = last ? this.t - last.t : Infinity;
       const spacing = ground ? r0 * 0.5 : r0 * 0.8;

@@ -74,6 +74,7 @@ export function predictPatches(sys, body, r, v, t, maxPatches = 3) {
   return patches;
 }
 
+const ICON_W = { planet: 11, star: 13, moon: 8, dwarf: 9, asteroid: 6, comet: 7 };
 export class MapView {
   constructor(world) {
     this.world = world;
@@ -94,7 +95,7 @@ export class MapView {
   }
   clear() { for (const [, l] of this.bodyLines) { this.group.remove(l); l.geometry.dispose(); } this.bodyLines.clear(); }
   // camPos: system frame; focusBody: body whose moons should be shown
-  update(sys, t, camPos, focusBody, vessel, plan) {
+  update(sys, t, camPos, focusBody, vessel, plan, others = []) {
     if (!this.group.visible) return;
     const show = new Set();
     const camFocusD = focusBody && focusBody.parentBody ? camPos.dist(focusBody.posAt(t)) : Infinity;
@@ -133,6 +134,9 @@ export class MapView {
     this.clearMarkers();
     const cam = this.world.camera;
     for (const b of show) if (b.type !== 'moon' || b.parentBody === focusBody || b.parentBody === focusBody?.parentBody) this.marker(sys, b.posAt(t), camPos, b.name, b === focusBody ? 'b' : 'body', b);
+    // vessels: yours, and the others in this star system (tap one to target it)
+    for (const o of others) if (o && o.body && !o.galactic && o.type !== 'debris') this.marker(sys, o.body.posAt(t).clone().add(o.r), camPos, o.name || 'Vessel', 'ves', null, o);
+    if (vessel && vessel.body && !vessel.galactic) this.marker(sys, vessel.body.posAt(t).clone().add(vessel.r), camPos, vessel.name || 'You', 'me', null, vessel);
     // vessel trajectory
     for (const l of [...this.traj, ...this.plan]) l.visible = false;
     if (vessel && vessel.body && !vessel.landed && !vessel.galactic) {
@@ -163,22 +167,30 @@ export class MapView {
     });
   }
   clearMarkers() { for (const m of this.markers) m.style.display = 'none'; this.mi = 0; }
-  marker(sys, pos, camPos, text, kind, body) {
+  marker(sys, pos, camPos, text, kind, body, ves) {
     const cam = this.world.camera;
     const v = new THREE.Vector3(pos.x - camPos.x, pos.y - camPos.y, pos.z - camPos.z);
     const p = v.clone().project(cam); if (p.z > 1 || p.z < -1 || Math.abs(p.x) > 1.05 || Math.abs(p.y) > 1.05) return;
-    let el = this.markers[this.mi]; if (!el) { el = h('div.marker'); el.addEventListener('click', () => { if (el._body && this.onPick) this.onPick(el._body); }); this.markers.push(el); this.markerLayer.append(el); } this.mi++;
+    // picked on pointerdown: the markers are refreshed every frame, and a tap whose element changed under it
+    // between press and release never became a click (so bodies couldn't be selected)
+    let el = this.markers[this.mi]; if (!el) { el = h('div.marker'); el.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (el._body && this.onPick) this.onPick(el._body); else if (el._ves && this.onPickVessel) this.onPickVessel(el._ves); }); this.markers.push(el); this.markerLayer.append(el); } this.mi++;
     el.style.display = ''; el.style.left = ((p.x + 1) / 2 * innerWidth) + 'px'; el.style.top = ((1 - p.y) / 2 * innerHeight) + 'px';
-    el._body = body || null; el.classList.toggle('pick', !!(body && this.onPick));
+    el._body = body || null; el._ves = ves || null; el.classList.toggle('pick', !!((body && this.onPick) || (ves && kind === 'ves' && this.onPickVessel)));
+    const set = (html, w) => { if (el._html !== html) { el._html = html; el.innerHTML = html; } el.style.transform = `translate(${-w / 2}px, -50%)`; }; // the icon (not the label) sits on the point
     if (body) {
       const type = body.type === 'kbo' || body.type === 'centaur' ? 'asteroid' : body.type;
       const st = TYPE_STYLE[type] || TYPE_STYLE.asteroid; const col = '#' + st.color.toString(16).padStart(6, '0');
       const showName = kind === 'b' || type === 'planet' || type === 'star' || type === 'dwarf' || type === 'moon' || body === this.target;
       el.title = text;
-      el.innerHTML = `<i class="ico ico-${type}" style="--c:${col}"></i>${showName ? `<span class="${kind === 'b' ? 'foc' : ''}">${text}</span>` : ''}`;
+      set(`<i class="ico ico-${type}" style="--c:${col}"></i>${showName ? `<span class="${kind === 'b' ? 'foc' : ''}">${text}</span>` : ''}`, ICON_W[type] || 8);
+      return;
+    }
+    if (ves) {
+      el.title = text; const me = kind === 'me', tg = ves === this.targetVessel;
+      set(`<i class="ico ico-ves${me ? ' me' : ''}"></i><span class="${me ? 'foc' : tg ? 'tgt' : ''}">${tg ? '◎ ' : ''}${text}</span>`, 14);
       return;
     }
     el.title = '';
-    el.innerHTML = kind === 'node' ? '<span style="color:#4a9dff">◆ ' + text + '</span>' : kind === 'ap' ? '<span style="color:#fcd34d">▲ ' + text + '</span>' : kind === 'soi' ? '<span style="color:#f0abfc">● ' + text + '</span>' : kind === 'imp' ? '<span style="color:#f87171">✖ ' + text + '</span>' : '· ' + text;
+    set(kind === 'node' ? '<span style="color:#4a9dff">◆ ' + text + '</span>' : kind === 'ap' ? '<span style="color:#fcd34d">▲ ' + text + '</span>' : kind === 'soi' ? '<span style="color:#f0abfc">● ' + text + '</span>' : kind === 'imp' ? '<span style="color:#f87171">✖ ' + text + '</span>' : '· ' + text, 10);
   }
 }

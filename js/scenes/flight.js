@@ -38,6 +38,7 @@ export class FlightScene {
     this.cam = new OrbitCam(G.world.renderer.domElement); this.cam.enabled = false;
     this.root = new THREE.Group(); this.root.name = 'flight'; G.world.scene.add(this.root);
     this.map = new MapView(G.world);
+    this.map.onPickVessel = (o) => { if (o === this.vessel) return; const same = this.map.targetVessel === o; this.map.targetVessel = same ? null : o; flash(same ? 'Target cleared' : 'Target: ' + (o.name || 'vessel') + ' (SAS Tgt points at it)'); };
     this.map.onPick = (b) => { this.mapFocus = this.vessel && b === this.vessel.body ? null : b; this.map.target = b; this.cam.zoom(Math.max(b.radius * 4, 5e5) / this.cam.dist, true); flash('Map focus: ' + b.name); };
     this.center = null; this.fx = [];
     this.ray = new THREE.Raycaster();
@@ -128,7 +129,8 @@ export class FlightScene {
       const Y = new THREE.Vector3(0, 1, 0), A = new THREE.Matrix4().makeBasis(Y.clone().cross(B), Y, B);
       const D = U.clone().negate(), W = new THREE.Matrix4().makeBasis(H.clone().cross(D), H, D);
       const q = new THREE.Quaternion().setFromRotationMatrix(W.multiply(A.transpose()));
-      const hgt = Math.max(0, earth.surface.height(U.x, U.y, U.z)) + clr + 0.25;
+      this.site ||= s; this.siteLevel ??= G.game.mode === 'career' ? (G.game.facility || 0) : 1;
+      const top = this.runwayTop(bf); const hgt = (top ? top - earth.radius : Math.max(0, earth.surface.height(U.x, U.y, U.z))) + clr + 0.1;
       if (this.lfx) this.lfx.clear();
       v.body = earth; v.landed = true; v.landedBF = U.toArray().map(x => x * (earth.radius + hgt)); v.landedQ = q.toArray(); this.syncLanded(v, G.t);
       v.situation = 'prelaunch'; v.brakes = false;
@@ -147,6 +149,18 @@ export class FlightScene {
       }
       v.landed = false; v.situation = 'orbiting';
     }
+  }
+  // The runway is a flat slab in the site's tangent plane, 4 km out: the curved ground falls ~1.3 m below it
+  // there, so wheels must roll on the slab's top, not the terrain. p: body-fixed point; returns the radius of
+  // the runway surface under it, or null off the runway.
+  runwayTop(p) {
+    const s = this.site || siteFrame(this.G.sys.get('Earth'));
+    const qi = s.q.clone().invert(); const l = new THREE.Vector3(p.x - s.bf[0], p.y - s.bf[1], p.z - s.bf[2]).applyQuaternion(qi);
+    const dx = l.x - RUNWAY.x, dz = l.z - RUNWAY.z, ca = Math.cos(RUNWAY.ang), sa = Math.sin(RUNWAY.ang);
+    const along = dx * sa + dz * ca, across = dx * ca - dz * sa;
+    if (Math.abs(along) > RUNWAY.len / 2 || Math.abs(across) > ((this.siteLevel ?? 1) ? 30 : 20) || l.y > 60) return null;
+    const top = new THREE.Vector3(l.x, (this.siteLevel ?? 1) ? 0.31 : 0.27, l.z).applyQuaternion(s.q);
+    return Math.hypot(s.bf[0] + top.x, s.bf[1] + top.y, s.bf[2] + top.z);
   }
   // set a vessel down upright on a body's surface at lat/lon (degrees)
   landAt(v, body, lat, lon, extra = 0) {
@@ -747,7 +761,7 @@ export class FlightScene {
       this.evaMove = { fwd: Math.max(-1, Math.min(1, fwd)), side: Math.max(-1, Math.min(1, side)), up: upd, jump: hit('Space') };
     } else {
       v.input.pitch = Math.max(-1, Math.min(1, k('KeyS', 'KeyW') + touch.pitch));
-      v.input.yaw = Math.max(-1, Math.min(1, k('KeyA', 'KeyD') - touch.yaw));
+      v.input.yaw = Math.max(-1, Math.min(1, k('KeyD', 'KeyA') + touch.yaw)); // (+yaw swings the nose toward -X, which is screen-right on the navball)
       v.input.roll = Math.max(-1, Math.min(1, k('KeyE', 'KeyQ') + touch.roll));
       v.input.x = k('KeyL', 'KeyJ'); v.input.y = k('KeyI', 'KeyK'); v.input.z = k('KeyH', 'KeyN');
     }
@@ -757,7 +771,9 @@ export class FlightScene {
     const G = this.G, v = this.vessel; const star = G.sys.star;
     const sp = star.posAt(G.t); const ap = this.absPos(); const d = ap.dist(sp);
     const starDir = new THREE.Vector3(ap.x - sp.x, ap.y - sp.y, ap.z - sp.z).normalize();
-    let targetDir = null;
+    let targetDir = null; const tv = this.map.targetVessel, tb = this.map.target;
+    if (tv && tv.body && tv.r && !v.galactic) { const a = tv.body.posAt(G.t).clone().add(tv.r).sub(ap); const l = a.len(); if (l > 1) targetDir = new THREE.Vector3(a.x / l, a.y / l, a.z / l); }
+    else if (tb && tb !== v.body && !v.galactic) { const a = tb.posAt(G.t).clone().sub(ap); const l = a.len(); if (l > 1) targetDir = new THREE.Vector3(a.x / l, a.y / l, a.z / l); }
     return { t: G.t, starDir, starDist: d, starLum: star.lum ?? 1, solarFlux: (star.lum ?? 1) / Math.pow(d / AU, 2), laserOn: G.sys.starId === 'sol' && v.body.name === 'Earth' && v.r.len() < 1e8,
       speedVsStar: v.v.len(), nodeDir: this.nodeDir, targetDir, noCrash: false };
   }
@@ -1152,9 +1168,10 @@ export class FlightScene {
       const s = this.site; const q = v.body.rotAt(G.t).invert(); const p = new THREE.Vector3(v.r.x, v.r.y, v.r.z).applyQuaternion(q);
       const dpad = Math.hypot(p.x - s.bf[0], p.y - s.bf[1], p.z - s.bf[2]);
       v.padHeight = dpad < 25 ? PAD_HEIGHT + 3 + (s.ground - (v.body.terrainHeightAt(v.r, G.t))) : dpad < PAD_RADIUS[this.siteLevel ?? 1] ? PAD_HEIGHT : 0;
+      const rw = this.runwayTop(p); if (rw) v.padHeight = Math.max(v.padHeight, rw - v.body.radius - v.body.terrainHeightAt(v.r, G.t));
     } else v.padHeight = 0;
     // map
-    if (this.mapMode) { this.updatePlan(); this.map.update(G.sys, G.t, camPos, this.mapFocus || v.body, v, this.plan); }
+    if (this.mapMode) { this.updatePlan(); this.map.update(G.sys, G.t, camPos, this.mapFocus || v.body, v, this.plan, (this.others || []).map(o => o.v)); }
     else if (this.node) this.updatePlan();
     G.world.setShadowSize(Math.max(40, Math.min(400, this.cam.dist * 1.2)));
     world.update({ t: G.t, camPos, focusRel, siteBF: this.site?.bf, siteBody: 'Earth', skyBright: 1 });

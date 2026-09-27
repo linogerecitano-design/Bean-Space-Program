@@ -75,10 +75,13 @@ export class World {
     if (!settings.auto || ft > 500) return; // ignore stalls (tab switches, loading)
     const F = this.frameTimes; F.push(ft); if (F.length > 40) F.shift();
     if (F.length < 30 || now - this.lastScaleChange < 1500) return;
-    const avg = F.slice().sort((a, b) => a - b)[Math.floor(F.length * 0.6)];
+    const sorted = F.slice().sort((a, b) => a - b), avg = sorted[Math.floor(F.length * 0.6)];
+    // the display's own frame interval (60, 90, 120 Hz — or 30 when a phone's battery saver caps it): judging
+    // frames against a fixed 60 fps budget kept capped phones at the lowest resolution although nothing was slow
+    const vsync = sorted[Math.floor(F.length * 0.1)], budget = Math.max(17.5, vsync * 1.15);
     let s = this.renderScale;
-    if (avg > 26) s = Math.max(0.5, s - (avg > 45 ? 0.15 : 0.08));
-    else if (avg < 17.5 && s < settings.q.scale) s = Math.min(settings.q.scale, s + 0.05);
+    if (avg > Math.max(26, vsync * 1.45)) s = Math.max(0.5, s - (avg > budget * 1.8 ? 0.15 : 0.08));
+    else if (avg < budget && s < settings.q.scale) s = Math.min(settings.q.scale, s + 0.05);
     if (Math.abs(s - this.renderScale) > 0.01) { this.renderScale = s; this.lastScaleChange = now; F.length = 0; this.resize(); }
   }
   setSystem(sys) {

@@ -252,6 +252,10 @@ export function makeTerrainMaterial(body) {
           }
           g -= dirBF * dot(g, dirBF);
           float bumpK = (uEarthLike > 0.5 ? 0.12 : mix(0.16, 0.08, uCrater)) * smoothstep(uDetailFade * 0.5, uDetailFade * 1.5, vCamDist);
+          // from far away the bumps would be hundreds of km across: a fake dimpled pattern that low sun at the
+          // terminator shows up. There the real relief (height map) or nothing takes over.
+          float texelH = uHasHeight > 0.5 ? 6.2831853 * uRadius * uHTexel.x : 1e9;
+          bumpK *= 1.0 - smoothstep(min(6000.0, texelH * 0.5), min(25000.0, texelH * 2.0), feat);
           vec3 cg = vec3(0.0);
           if (uCrater > 0.01) {
             // craters from ~feature size up to 8x that, so new ones keep resolving as you descend. Each
@@ -264,6 +268,7 @@ export function makeTerrainMaterial(body) {
               cg += craterGrad(bp / sc + off) * wk;
             }
             cg -= dirBF * dot(cg, dirBF);
+            cg *= 1.0 - smoothstep(min(40000.0, texelH), min(150000.0, texelH * 4.0), feat);
           }
           nGeo = normalize(nGeo - g * bumpK - cg * 0.9 * uCrater);
         }

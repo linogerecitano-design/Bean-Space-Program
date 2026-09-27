@@ -43,9 +43,9 @@ export class Navball {
   resize() { const c = this.r.domElement; this.r.setSize(c.clientWidth || 190, c.clientHeight || 190, false); }
   // vesselQ: world orientation of vessel (nose = +Y). up/north/east: local horizon basis (world). vectors: {pro:Vector3,...}
   update(vesselQ, up, north, vecs) {
-    // view looks along the vessel nose; screen-up is vessel -Z (the "top" of the pod)
+    // view looks along the vessel nose; screen-up is vessel +Z (the top of a plane: canopy and tail fin; gear go on -Z)
     const nose = new THREE.Vector3(0, 1, 0).applyQuaternion(vesselQ);
-    const top = new THREE.Vector3(0, 0, -1).applyQuaternion(vesselQ);
+    const top = new THREE.Vector3(0, 0, 1).applyQuaternion(vesselQ);
     const right = new THREE.Vector3().crossVectors(top, nose);
     // world -> navball-view: x=right, y=top, z=nose (the nose direction faces the viewer)
     const M = new THREE.Matrix4().makeBasis(right, top, nose).transpose();
