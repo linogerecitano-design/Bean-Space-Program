@@ -309,3 +309,62 @@ export function makeShapePlasma(vesselGroup) {
     hide() { for (const e of entries) for (const t of e.twins) t.visible = false; },
   };
 }
+
+// ---------------------------------------------------------------- sparks and grit from scraping
+// Particles live in body-centred inertial coordinates (so they stay put on the ground while the vessel
+// slides away); drawn as additive points whose colour cools from white-yellow to dull orange.
+export class Sparks {
+  constructor(root, max = 700) {
+    this.max = max; this.list = [];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(max * 3), 3));
+    geo.setAttribute('heat', new THREE.BufferAttribute(new Float32Array(max), 1));
+    geo.setAttribute('size', new THREE.BufferAttribute(new Float32Array(max), 1));
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: `#include <common>
+        #include <logdepthbuf_pars_vertex>
+        attribute float heat; attribute float size; varying float vH;
+        void main(){ vH = heat; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = clamp(size * 2200.0 / -mv.z, 3.0, 26.0);
+        #include <logdepthbuf_vertex>
+        }`,
+      fragmentShader: `#include <common>
+        #include <logdepthbuf_pars_fragment>
+        varying float vH;
+        void main(){
+        #include <logdepthbuf_fragment>
+        vec2 d = gl_PointCoord - 0.5; float r = length(d) * 2.0; if (r > 1.0) discard;
+        vec3 c = mix(vec3(0.9, 0.25, 0.03), vec3(1.0, 0.92, 0.6), clamp(vH, 0.0, 1.0));
+        gl_FragColor = vec4(c * (1.0 - r * r) * (1.0 + 7.0 * vH), 1.0); }`,
+    });
+    this.points = new THREE.Points(geo, mat); this.points.frustumCulled = false; this.points.renderOrder = 6;
+    root.add(this.points);
+  }
+  // p: body-relative contact point; vt: slide direction; s: slide speed; n: ground normal; base: ground velocity
+  emit(p, vt, s, n, base, k = 1) {
+    const cnt = Math.min(18, Math.round((2 + s * 0.6) * Math.max(0.4, k) * (0.6 + Math.random())));
+    for (let i = 0; i < cnt && this.list.length < this.max; i++) {
+      const sp = s * (0.35 + Math.random() * 0.6);
+      const up = 1 + Math.random() * 4 + s * 0.08;
+      const sx = (Math.random() - 0.5) * s * 0.35, sy = (Math.random() - 0.5) * s * 0.35, sz = (Math.random() - 0.5) * s * 0.35;
+      this.list.push({ p: [p[0], p[1], p[2]], v: [base.x + vt[0] * sp + n[0] * up + sx, base.y + vt[1] * sp + n[1] * up + sy, base.z + vt[2] * sp + n[2] * up + sz], age: 0, life: 0.25 + Math.random() * 0.7, size: 0.05 + Math.random() * 0.08 });
+    }
+  }
+  // dt: seconds; g: gravity vector at the site; offset: body position minus camera (camera-relative drawing)
+  update(dt, g, offset, ground) {
+    const P = this.points.geometry.attributes.position, H = this.points.geometry.attributes.heat, S = this.points.geometry.attributes.size;
+    let n = 0;
+    for (const s of this.list) {
+      s.age += dt; if (s.age > s.life) continue;
+      s.v[0] += g.x * dt; s.v[1] += g.y * dt; s.v[2] += g.z * dt;
+      const f = Math.exp(-dt * 1.5); s.v[0] *= f; s.v[1] *= f; s.v[2] *= f;
+      s.p[0] += s.v[0] * dt; s.p[1] += s.v[1] * dt; s.p[2] += s.v[2] * dt;
+      if (ground) { const r = Math.hypot(s.p[0], s.p[1], s.p[2]); if (r < ground) { const k = ground / r; s.p[0] *= k; s.p[1] *= k; s.p[2] *= k; const up = [s.p[0] / ground, s.p[1] / ground, s.p[2] / ground]; const vn = s.v[0] * up[0] + s.v[1] * up[1] + s.v[2] * up[2]; if (vn < 0) { s.v[0] -= 1.6 * vn * up[0]; s.v[1] -= 1.6 * vn * up[1]; s.v[2] -= 1.6 * vn * up[2]; s.v[0] *= 0.5; s.v[1] *= 0.5; s.v[2] *= 0.5; } } } // bounce
+      P.setXYZ(n, s.p[0] + offset.x, s.p[1] + offset.y, s.p[2] + offset.z); H.setX(n, 1 - s.age / s.life); S.setX(n, s.size); n++;
+    }
+    this.list = this.list.filter(s => s.age <= s.life);
+    this.points.geometry.setDrawRange(0, n); P.needsUpdate = true; H.needsUpdate = true; S.needsUpdate = true;
+    this.points.visible = n > 0;
+  }
+  clear() { this.list.length = 0; this.points.visible = false; }
+}

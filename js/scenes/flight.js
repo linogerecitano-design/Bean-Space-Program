@@ -21,7 +21,7 @@ import { loadSystem } from '../core/universe.js';
 import { IS_MOBILE } from '../render/textures.js';
 import { bakeListeners } from '../gen/baker.js';
 import { graphicsDialog } from '../ui/graphics.js';
-import { makeShapePlasma, makeFireball } from '../render/vfx.js';
+import { makeShapePlasma, makeFireball, Sparks } from '../render/vfx.js';
 import { ClothChute } from '../render/chuteCloth.js';
 import { beanier } from '../game/settings.js';
 import { LaunchFX, frostPatch } from '../render/volumetrics.js';
@@ -1085,6 +1085,11 @@ export class FlightScene {
     if (v.type !== 'eva') this.updateHullGlow();
     // chutes: simple canopy
     this.updateChutes(dt * fxWarp);
+    // sparks from anything scraping along the ground
+    if (!this.sparks || this.sparks.points.parent !== this.root) { this.sparks = new Sparks(this.root); }
+    if (v.scrapes && v.scrapes.length) { const base = v.body.surfaceVel(v.r); for (const e of v.scrapes) this.sparks.emit(e.p, e.vt, e.s, e.n, base, e.k); v.scrapes.length = 0; }
+    { const bp = v.body.posAt(G.t); const up = v.r.clone().norm(); const gg = v.body.mu / v.r.len2();
+      this.sparks.update(Math.min(0.1, dt * fxWarp), { x: -up.x * gg, y: -up.y * gg, z: -up.z * gg }, { x: bp.x - camPos.x, y: bp.y - camPos.y, z: bp.z - camPos.z }, v.body.hasSurface ? v.body.radius + v.body.surfaceHeightAt(v.r, G.t) : 0); }
     // deployable solar arrays fold/unfold (and retract automatically in thick air)
     if (this.mesh.userData.parts) for (const m of this.mesh.userData.parts) {
       const wing = m.userData.wing; if (!wing) continue; const rt = m.userData.rt;

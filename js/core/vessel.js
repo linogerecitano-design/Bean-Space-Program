@@ -437,6 +437,8 @@ export function physicsStep(v, dt, ctx) {
         const vt = pv.clone().addScaled(n, -vn); const vtl = vt.len();
         const fr = vtl > 1e-4 ? Math.min(fn * 0.8, mkg * vtl / dt * 0.25 / Math.max(1, nIn)) : 0;
         const F = n.clone().scale(fn); if (vtl > 1e-4) F.addScaled(vt, -fr / vtl);
+        // scraping along hard ground throws sparks (the flight scene reads and clears this list)
+        if (!water && vtl > 3.5 && fn > 0) { v.scrapes ||= []; if (v.scrapes.length < 24) v.scrapes.push({ p: [px, py, pz], vt: [vt.x / vtl, vt.y / vtl, vt.z / vtl], s: vtl, n: [n.x, n.y, n.z], k: Math.min(1, fn / (mkg * 9.8)) }); }
         Fn.add(F);
         T.add(new THREE.Vector3().crossVectors(lp, new THREE.Vector3(F.x, F.y, F.z)));
       }
